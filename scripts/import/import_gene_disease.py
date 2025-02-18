@@ -9,11 +9,13 @@ import xml.etree.ElementTree as ET
 import warnings
 import csv
 import configparser
+from pathlib import Path
+from os import listdir
 
 """
     Script      : import_gene_disease.py
 
-    Description : Imports gene-disease associations from OMIM (Ensembl) and Mondo
+    Description : Imports/updates gene-disease associations from OMIM (Ensembl) and Mondo
                   The script can be run in two modes:
                     - import (default) : Runs a full import of the data. This mode should only be run on a newly created db.
                                          The script runs a check before this mode is run to make sure the db doesn't include gene-disease
@@ -22,19 +24,35 @@ import configparser
 
     Options
                 --config: Config file with connection details to Ensembl and G2P databases (mandatory)
-                --omim : option to import/update OMIM gene-disease data (default: 1)
-                --mondo : option to import/update Mondo gene-disease data (default: 1)
-                --mondo_file : Mondo owl file with gene-disease data. Supported formats: owl, csv (default: '')
-                --update : option to run the script in update mode (default: 0)
+                    File format is the following:
+                            [ensembl_database]
+                            host = <>
+                            port = <>
+                            user = <>
+                            password = <>
+                            database = <>
+
+                            [g2p_database]
+                            g2p_host = <>
+                            g2p_port = <>
+                            g2p_database = <>
+                            g2p_user = <>
+                            g2p_password = <>
+
+                --omim: Option to import OMIM gene-disease data (default=1)
+                --mondo: Option to import MONDO gene-disease data (default=1)
+                --mondo_file: MONDO file. Supported formats: owl, csv. Only necessary when importing mondo (--mondo).
+                --update: Option to run the script in update mode. By default, the script runs a full import (default=0)
 """
 
-debug = 0
+debug = 0 # to help parse the owl file
 
-"""
-    Retrieve meta info from G2P db
-    Retrieve the latest OMIM and Mondo updates info
-"""
 def get_g2p_meta(db_host, db_port, db_name, user, password):
+    """
+        Retrieve meta info from G2P db
+        Retrieve the latest OMIM and Mondo updates info
+    """
+
     meta_info = {}
 
     db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
@@ -67,10 +85,11 @@ def get_g2p_meta(db_host, db_port, db_name, user, password):
 
     return meta_info
 
-"""
-    Retrieve OMIM gene disease data from Ensembl core db
-"""
 def get_mim_gene_diseases(db_host, db_port, db_name, user, password):
+    """
+        Retrieve OMIM gene disease data from Ensembl core db
+    """
+
     gene_diseases = {}
 
     db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
@@ -104,11 +123,11 @@ def get_mim_gene_diseases(db_host, db_port, db_name, user, password):
     db.close()
     return gene_diseases
 
-
-"""
-    Insert OMIM gene disease data into G2P database
-"""
 def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, version):
+    """
+        Insert OMIM gene disease data into G2P database
+    """
+
     sql_gene = """ SELECT l.id FROM locus l
                    LEFT JOIN locus_identifier i on i.locus_id = l.id
                    LEFT JOIN source s on s.id = i.source_id
@@ -156,15 +175,15 @@ def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_dis
     db.commit()
     db.close()
 
-
-"""
-    Update OMIM gene-disease data
-
-    'gene_diseases' example:
-        GDF15 => [{'stable_id': 'ENSG00000130513', 'mim_id': '620730',
-                  'disease': 'HYPEREMESIS GRAVIDARUM, SUSCEPTIBILITY TO; HG'}]
-"""
 def update_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, omim_version):
+    """
+        Update OMIM gene-disease data stored in gene_diseases
+
+        'gene_diseases' example:
+            GDF15 => [{'stable_id': 'ENSG00000130513', 'mim_id': '620730',
+                    'disease': 'HYPEREMESIS GRAVIDARUM, SUSCEPTIBILITY TO; HG'}]
+    """
+
     g2p_current_data = {} # saves current OMIM gene-disease associations from G2P to compare with new data
     g2p_all_transcripts = {}
 
@@ -251,91 +270,101 @@ def update_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_dis
     db.commit()
     db.close()
 
-"""
-    Retrieve the gene-disease association from the Mondo file in owl or csv format
-    Returns a dict "mondo_id": { "disease_name", "hgnc_id" }
-"""
 def get_mondo_gene_diseases(file, file_format):
-    with open(file, "r") as fh:
-        results = {}
-        mondo_ids = []
-        mondo_diseases = {}
-        start_class = 0
+    """
+        Retrieve the gene-disease association from the Mondo file in owl or csv format
 
-        if file_format == "owl":
-            for event, elem in ET.iterparse(fh, events=("start", "end")):
-                is_element = None
-                disease_name = None
-                disease_synonym = None
-                hgnc_id = None
+        Returns a dict with the following structure
+            key: (string) Mondo ID
+            value: (dict) { "disease_name": name of disease, "hgnc_id": HGNC ID }
+    """
 
-                if event == "start" and elem.tag == "{http://www.w3.org/2002/07/owl#}Class":
-                    # Some entries have a class inside a class
-                    # We want to skip those - only the first class is relevant
-                    if start_class == 1 and debug == 1:
-                        print("Start class when another class still open")
+    results = {}
 
-                    if start_class == 0:
-                        start_class = 1
+    if file_format == "owl":
+        # Open the tmp dir where all the input files are saved
+        for tmp_file in listdir("tmp/"):
+            with open("tmp/"+tmp_file, "r") as fh:
+                mondo_ids = []
+                mondo_diseases = {}
+                start_class = 0
+                if file_format == "owl":
+                    for event, elem in ET.iterparse(fh, events=("start", "end")):
+                        is_element = None
+                        disease_name = None
+                        disease_synonym = None
+                        hgnc_id = None
 
-                        if debug == 1:
-                            ET.dump(elem)
+                        if event == "start" and elem.tag == "{http://www.w3.org/2002/07/owl#}Class":
+                            # Some entries have a class inside a class
+                            # We want to skip those - only the first class is relevant
+                            if start_class == 1 and debug == 1:
+                                print("Start class when another class still open")
 
-                        for i in elem.iter():
-                            # Get mondo ID
-                            if i.tag == "{http://www.geneontology.org/formats/oboInOwl#}id" and i.text is not None:
-                                is_element = i.text
+                            if start_class == 0:
+                                start_class = 1
 
-                            # Get disease name
-                            if i.tag == "{http://www.w3.org/2000/01/rdf-schema#}label" and i.text is not None:
-                                disease_name = i.text
+                                if debug == 1:
+                                    ET.dump(elem)
 
-                            # Get disease synonym
-                            # This is necessary if for some reason it can't get the name from the label
-                            if i.tag == "{http://www.geneontology.org/formats/oboInOwl#}hasExactSynonym" and i.text is not None:
-                                disease_synonym = i.text
+                                for i in elem.iter():
+                                    # Get mondo ID
+                                    if i.tag == "{http://www.geneontology.org/formats/oboInOwl#}id" and i.text is not None:
+                                        is_element = i.text
 
-                            # Get HGNC ID from the class
-                            # This is probably not necessary
-                            if(i.tag == "{http://www.w3.org/2002/07/owl#}someValuesFrom"
-                            and i.attrib is not None and "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource" in i.attrib.keys()
-                            and "hgnc" in i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"]):
-                                hgnc_id = i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"].split("/")[-1]
+                                    # Get disease name
+                                    if i.tag == "{http://www.w3.org/2000/01/rdf-schema#}label" and i.text is not None:
+                                        disease_name = i.text
 
-                            if is_element is not None and disease_name is not None and not disease_name.startswith("obsolete"):
-                                mondo_ids.append(is_element)
-                            
-                            # This is a special case
-                            elif is_element is not None and disease_name is None and disease_synonym is not None:
-                                mondo_ids.append(is_element)
-                                disease_name = disease_synonym
+                                    # Get disease synonym
+                                    # This is necessary if for some reason it can't get the name from the label
+                                    if i.tag == "{http://www.geneontology.org/formats/oboInOwl#}hasExactSynonym" and i.text is not None:
+                                        disease_synonym = i.text
 
-                # Class is over
-                if event == "end" and elem.tag == "{http://www.w3.org/2002/07/owl#}Class":
-                    start_class = 0
+                                    # Get HGNC ID from the class
+                                    # This is probably not necessary
+                                    if(i.tag == "{http://www.w3.org/2002/07/owl#}someValuesFrom"
+                                    and i.attrib is not None and "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource" in i.attrib.keys()
+                                    and "hgnc" in i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"]):
+                                        hgnc_id = i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"].split("/")[-1]
 
-                # Save the disease name - this is necessary because the HGNC is outside of the Class
-                if is_element is not None and disease_name is not None and is_element not in mondo_diseases:
-                    mondo_diseases[is_element] = disease_name
+                                    if is_element is not None and disease_name is not None and not disease_name.startswith("obsolete"):
+                                        mondo_ids.append(is_element)
+                                    
+                                    # This is a special case
+                                    elif is_element is not None and disease_name is None and disease_synonym is not None:
+                                        mondo_ids.append(is_element)
+                                        disease_name = disease_synonym
 
-                # Get HGNC ID from outside the elem "Class"
-                # At this point the is_element is None - we don't have the Mondo ID anymore
-                # but we know that the Mondo ID is the previous ID analysed
-                if event == "end" and elem.tag == "{http://www.w3.org/2002/07/owl#}Restriction" and is_element is None and len(mondo_ids) >= 1:
-                    is_element = mondo_ids[-1]
+                        # Class is over
+                        if event == "end" and elem.tag == "{http://www.w3.org/2002/07/owl#}Class":
+                            start_class = 0
 
-                    for i in elem.iter():
-                        if(i.tag == "{http://www.w3.org/2002/07/owl#}someValuesFrom" 
-                            and "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource" in i.attrib.keys()
-                            and "hgnc" in i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"]):
-                            hgnc_id = i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"].split("/")[-1]
-                            disease_name = mondo_diseases[is_element]
+                        # Save the disease name - this is necessary because the HGNC is outside of the Class
+                        if is_element is not None and disease_name is not None and is_element not in mondo_diseases:
+                            mondo_diseases[is_element] = disease_name
 
-                if is_element is not None and disease_name is not None and hgnc_id is not None and is_element not in results:
-                    results[is_element] = { "disease": disease_name, "hgnc_id": hgnc_id }
+                        # Get HGNC ID from outside the elem "Class"
+                        # At this point the is_element is None - we don't have the Mondo ID anymore
+                        # but we know that the Mondo ID is the previous ID analysed
+                        if event == "end" and elem.tag == "{http://www.w3.org/2002/07/owl#}Restriction" and is_element is None and len(mondo_ids) >= 1:
+                            is_element = mondo_ids[-1]
 
-        elif file_format == "csv":
-            reader = csv.reader(fh)
+                            for i in elem.iter():
+                                if(i.tag == "{http://www.w3.org/2002/07/owl#}someValuesFrom" 
+                                    and "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource" in i.attrib.keys()
+                                    and "hgnc" in i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"]):
+                                    hgnc_id = i.attrib["{http://www.w3.org/1999/02/22-rdf-syntax-ns#}resource"].split("/")[-1]
+                                    disease_name = mondo_diseases[is_element]
+
+                        if is_element is not None and disease_name is not None and hgnc_id is not None and is_element not in results:
+                            results[is_element] = { "disease": disease_name, "hgnc_id": hgnc_id }
+
+            fh.close()
+
+    elif file_format == "csv":
+        with open(file, "r") as fh_csv:
+            reader = csv.reader(fh_csv)
             for row in reader:
                 # Skip comment line (version) and header
                 if not row[0].startswith("#") and not row[0].startswith("mondoCURIE"):
@@ -345,19 +374,20 @@ def get_mondo_gene_diseases(file, file_format):
 
                     if mondo_id not in results:
                         results[mondo_id] = { "disease": mondo_description, "hgnc_id": hgnc_id }
-        
-        else:
-            sys.exit("Invalid Mondo file format. Accepted formats are: owl and csv")
 
-    fh.close()
+        fh_csv.close()
+
+    else:
+        sys.exit("Invalid Mondo file format. Accepted formats are: owl and csv")
 
     return results
 
-"""
-    Insert Mondo gene disease data into G2P database
-    This method runs a full import
-"""
 def insert_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, mondo_version):
+    """
+        Insert Mondo gene disease data into G2P database
+        This method runs a full import
+    """
+
     sql_gene = """ SELECT l.id FROM locus l
                    LEFT JOIN locus_identifier i on i.locus_id = l.id
                    LEFT JOIN source s on s.id = i.source_id
@@ -405,14 +435,22 @@ def insert_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
     db.commit()
     db.close()
 
-"""
-    Updates the Mondo gene-disease associations
-    Affected tables: gene_disease, meta
-
-    'gene_diseases' format example:
-        MONDO:1040051 : {'disease': 'IMPDH1-related retinopathy', 'hgnc_id': '6052'}
-"""
 def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, mondo_version, file_format):
+    """
+        Updates the Mondo gene-disease associations stored in gene_diseases.
+        If input file is of csv format, the method is going to:
+        - import new IDs
+        - update existing IDs
+        - delete IDs from G2P that are not present in the input file
+        If input file is of owl format, the method is going to:
+        - import new IDs
+        - update existing IDs
+        Note: owl format can miss the link between Mondo ID and HGNC ID
+
+        'gene_diseases' format example:
+            MONDO:1040051 : {'disease': 'IMPDH1-related retinopathy', 'hgnc_id': '6052'}
+    """
+
     g2p_current_data = {} # saves current Mondo gene-disease associations from G2P to compare with new data from input file
     g2p_all_hgnc_ids = {}
     source_id = None
@@ -500,6 +538,7 @@ def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
 
     # Check which Mondo IDs are obsolet, i.e. they are found in G2P but not in Mondo csv input file
     # Note: this update is only run when we import from the csv file - this format is more reliable
+    # for some records owl format is missing the corresponding HGNC ID
     if file_format == "csv":
         print("\nChecking obsolete IDs")
         for mondo_g2p in g2p_current_data:
@@ -518,10 +557,11 @@ def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
     db.commit()
     db.close()
 
-"""
-    Fetch the Mondo data version from the owl or csv file
-"""
 def fetch_mondo_version(file, file_format):
+    """
+        Fetch the Mondo data version from the owl or csv file
+    """
+
     version = None
 
     if file_format != "owl" and file_format != "csv":
@@ -544,31 +584,28 @@ def fetch_mondo_version(file, file_format):
 
     return version
 
+def split_mondo_file(file):
+    Path("tmp").mkdir(parents=True, exist_ok=True)
+    output_file = "tmp/mondo_"
+    count = 1
+    header = None
+
+    with open(file, 'r') as f2:
+        data = f2.read()
+
+        for chunk in re.split(r"\s*\<\!\-\-*", data):
+            if count == 1:
+                header = chunk
+                count = count + 1
+            else:
+                with open(output_file+str(count)+".owl", "w") as wr:
+                    wr.write(header)
+                    wr.write("\n<!-- "+chunk)
+                    if "</rdf:RDF>" not in chunk:
+                        wr.write("\n</rdf:RDF>")
+                    count = count + 1
 
 def main():
-    """
-        Params:
-                --config : Config file name containing the Ensembl and G2P databases connection info (mandatory)
-                        File format is the following:
-                            [ensembl_database]
-                            host = <>
-                            port = <>
-                            user = <>
-                            password = <>
-                            database = <>
-
-                            [g2p_database]
-                            g2p_host = <>
-                            g2p_port = <>
-                            g2p_database = <>
-                            g2p_user = <>
-                            g2p_password = <>
-
-                --omim: Option to import OMIM gene-disease data (default=1)
-                --mondo: Option to import MONDO gene-disease data (default=1)
-                --mondo_file: MONDO file. Supported formats: owl, csv. Only necessary to import mondo (--mondo).
-                --update: Option to run the script in update mode. By default, the script runs a full import (default=0)
-    """
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--config", required=True, help="Config file with details to Ensembl and G2P databases")
     parser.add_argument("--omim", default=1, help="Import OMIM gene-disease data")
@@ -680,6 +717,8 @@ def main():
         # Only fetch OMIM data from Ensembl if import/update can be done
         if update_mode == 1 or run_import == 1:
             # TODO: split the input file - one file per mondo ID
+            if file_format == "owl":
+                split_mondo_file(mondo_file)
 
             # Retrive Mondo gene-disease from Mondo owl or csv file
             print("Getting Mondo gene-disease associations...")
