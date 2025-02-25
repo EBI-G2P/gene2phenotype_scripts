@@ -77,6 +77,8 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
             publication_info = None
             variant_consequences = None # column name 'inferred variant consequence'
 
+            # TODO: check if record already exists in G2P
+
             # Validate the gene
             # TODO: also consider synonyms
             try:
@@ -203,6 +205,8 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                 # Append the publication consanguineous only if the PMID is valid
                 if "publication consanguineous" in row and row["publication consanguineous"] != "":
                     publications[0]["consanguineous"] = row["publication consanguineous"]
+
+                publications[0]["ancestries"] = "" # TODO
 
             # Validate the mechanism evidence (if applicable)
             # The evidence is linked to the publication
@@ -456,21 +460,44 @@ def load_data(api_url, api_username, api_password, records_to_load):
         "password": api_password
     }
 
+    records_created = []
+
     response = requests.post(api_url + login_url, json=data)
     if response.status_code == 200:
         for record in records_to_load:
             data_to_add = { "json_data":records_to_load[record] }
             try:
-                response_update = requests.post(api_url + create_curation_url, json=json.dumps(data_to_add), cookies=response.cookies)
-                if response_update.status_code == 200:
-                    response_json = response_update.json()
-                    print("Response:", response_json)
-                else:
-                    print(f"Record: {record}; Failed to create curation record:", response_update.status_code, response_update.json())
+                # Create the curation record
+                response_update = requests.post(
+                    api_url + create_curation_url,
+                    json=data_to_add,
+                    cookies=requests.utils.dict_from_cookiejar(response.cookies)
+                )
             except Exception as e:
                 print(f"Record: {record}; Error:", e)
+            else:
+                if response_update.status_code == 200:
+                    response_json = response_update.json()
+                    new_g2p_record = response_json["result"]
+                    try:
+                        # Publish the record
+                        response_publish = requests.post(
+                            api_url + curation_publish_url + new_g2p_record + "/",
+                            cookies=requests.utils.dict_from_cookiejar(response.cookies)
+                        )
+                    except Exception as e:
+                        print(f"Error to publish {new_g2p_record}:", e)
+                    else:
+                        if response_publish.status_code == 200:
+                            records_created.append(new_g2p_record)
+                        else:
+                            print(f"Failed to publish {new_g2p_record}:", response_publish.status_code, response_publish.json())
+                else:
+                    print(f"Failed to create curation record {record}:", response_update.status_code, response_update.json())
     else:
         print("Error: cannot login into G2P")
+
+    return records_created
 
 
 def fetch_g2p_attribs(db_host, db_port, db_name, user, password):
@@ -606,9 +633,15 @@ def fetch_pmid(api_url, pmid):
     result = None
     publication_url = api_url+"/publication/"+str(pmid)
 
-    response = requests.get(publication_url)
-    if response.status_code == 200:
-        result = response.json()
+    try:
+        response = requests.get(publication_url)
+    except Exception as e:
+        print(f"Error while fetching pmid {pmid}:", e)
+    else:
+        if response.status_code == 200:
+            result = response.json()
+        else:
+            print(f"Failed to fetch pmid {pmid}")
 
     return result
 
@@ -678,10 +711,21 @@ def main():
     # Prepare the data to be imported
     records_to_load, can_import = prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report)
 
-    print("Can import?", can_import)
-
-    # if can_import:
-    load_data(api_url, api_username, api_password, records_to_load)
+    if dryrun:
+        if can_import:
+            print("Dryrun > records to load into G2P:")
+            for key in records_to_load:
+                print(key)
+        else:
+            print(f"Dryrun > please check file '{report}' for details.")
+    # Import records
+    elif can_import:
+        print("Loading records into G2P...")
+        load_data(api_url, api_username, api_password, records_to_load)
+        print("Loading records into G2P... done")
+    # Not possible to import records
+    elif not can_import:
+        print(f"Cannot load records into G2P. Please check file '{report}' for more details.")
 
 if __name__ == '__main__':
     main()
