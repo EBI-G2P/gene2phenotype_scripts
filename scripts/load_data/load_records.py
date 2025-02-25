@@ -4,6 +4,7 @@ import sys
 import argparse
 import MySQLdb
 import re
+import json
 import requests
 import configparser
 from pandas import read_excel, read_csv
@@ -455,15 +456,15 @@ def load_data(api_url, api_username, api_password, records_to_load):
         "password": api_password
     }
 
-    session = requests.Session()
-
-    response = session.post(api_url + login_url, json=data)
+    response = requests.post(api_url + login_url, json=data)
     if response.status_code == 200:
         for record in records_to_load:
+            data_to_add = { "json_data":records_to_load[record] }
             try:
-                response_update = session.post(api_url + create_curation_url, json=record)
+                response_update = requests.post(api_url + create_curation_url, json=json.dumps(data_to_add), cookies=response.cookies)
                 if response_update.status_code == 200:
                     response_json = response_update.json()
+                    print("Response:", response_json)
                 else:
                     print(f"Record: {record}; Failed to create curation record:", response_update.status_code, response_update.json())
             except Exception as e:
@@ -679,8 +680,8 @@ def main():
 
     print("Can import?", can_import)
 
-    if can_import:
-        load_data(api_url, api_username, api_password, records_to_load)
+    # if can_import:
+    load_data(api_url, api_username, api_password, records_to_load)
 
 if __name__ == '__main__':
     main()
