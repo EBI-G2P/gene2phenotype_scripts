@@ -35,6 +35,9 @@ from pandas import read_excel, read_csv
                 --dryrun: Test script without running the import (default: 0)
 """
 
+# Global variables to count the number of records
+n_invalid_records = 0
+
 def read_file(file):
     file_data = None
     file_data_df = None
@@ -55,15 +58,16 @@ def read_file(file):
     # Validate the file format
     header = file_data[0].keys()
     mandatory_fields = ["gene symbol", "hgnc id", "disease name", "allelic requirement", "molecular mechanism", "confidence",
-                        "publication PMID", "panel", "inferred variant consequence"]
-    
+                        "publication", "panel", "inferred variant consequence", "evidence based variant consequence"]
+
     if not all(column in header for column in mandatory_fields):
         sys.exit(f"ERROR: missing data. Mandatory fields are: {mandatory_fields}")   
 
     return file_data
 
-def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report):
+def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report):
     records_to_load = {} # key: unique key identifying the record; value: json obj
+    invalid_records = {}
     can_import = True
 
     with open(report, "w") as wr:
@@ -78,9 +82,13 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
             variant_consequences = None # column name 'inferred variant consequence'
 
             # TODO: check if record already exists in G2P
+            key = row["gene symbol"]+"-"+row["disease name"]+"-"+row["allelic requirement"]+"-"+row["molecular mechanism"]
+            if key in g2p_records:
+                message = f"Record already in G2P: {g2p_records[key]['stable_id']}"
+                errors.append(message)
+                valid_record = False
 
             # Validate the gene
-            # TODO: also consider synonyms
             try:
                 g2p_genes[row["gene symbol"]]
             except KeyError:
@@ -152,61 +160,88 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                 errors.append(message)
                 valid_record = False
 
-            # Validate the variant consequences
+            # Validate the inferred variant consequences
             # In G2P the consequence values do not include '_'
             variant_consequences = []
-            for var_cons in re.split(r'\;\s*', row["inferred variant consequence"].replace("_", " ")):
-                try:
-                    g2p_ontology[var_cons]
-                except KeyError:
-                    message = f"Invalid variant consequence '{var_cons}'"
-                    errors.append(message)
-                    valid_record = False
-                else:
-                    variant_consequences.append({
-                        "support": "inferred",
-                        "variant_consequence": var_cons
-                    })
+            if str(row["inferred variant consequence"]) != "nan":
+                for var_cons in re.split(r'\;\s*', row["inferred variant consequence"].replace("_", " ")):
+                    try:
+                        g2p_ontology[var_cons]
+                    except KeyError:
+                        message = f"Invalid variant consequence '{var_cons}'"
+                        errors.append(message)
+                        valid_record = False
+                    else:
+                        variant_consequences.append({
+                            "support": "inferred",
+                            "variant_consequence": var_cons
+                        })
+
+            # Validate the evidence based variant consequences
+            # In G2P the consequence values do not include '_'
+            if str(row["evidence based variant consequence"]) != "nan":
+                for var_cons in re.split(r'\;\s*', row["evidence based variant consequence"].replace("_", " ")):
+                    try:
+                        g2p_ontology[var_cons]
+                    except KeyError:
+                        message = f"Invalid variant consequence '{var_cons}'"
+                        errors.append(message)
+                        valid_record = False
+                    else:
+                        variant_consequences.append({
+                            "support": "evidence",
+                            "variant_consequence": var_cons
+                        })
 
             # Validate the PMID - there is one publication per row
             publications = []
-            if isinstance(row["publication PMID"], int):
-                publication_info = fetch_pmid(api_url, row["publication PMID"])
+            if isinstance(row["publication"], int):
+                publication_info = fetch_pmid(api_url, row["publication"])
                 if not publication_info:
-                    message = f"Invalid PMID {row['publication PMID']}"
+                    message = f"Invalid PMID {row['publication']}"
                     errors.append(message)
                     valid_record = False
                 else:
                     publications.append({
-                        "pmid": row["publication PMID"],
+                        "pmid": row["publication"],
                         "year": publication_info["results"][0]["year"],
                         "title": publication_info["results"][0]["title"],
                         "source": publication_info["results"][0]["source"],
                         "authors": publication_info["results"][0]["authors"]
                     })
             else:
-                message = f"Invalid PMID {row['publication PMID']}"
+                message = f"Invalid PMID {row['publication']}"
                 errors.append(message)
                 valid_record = False
 
             if valid_record:
+                # Set the publication data to the default values
+                # It is necessary in case some values are not provided in the file
+                publications[0]["comment"] = ""
+                publications[0]["families"] = None
+                publications[0]["affectedIndividuals"] = None
+                publications[0]["consanguineous"] = ""
+                publications[0]["ancestries"] = ""
+
                 # Append the publication comment only if the PMID is valid
-                if "publication comment" in row and row["publication comment"] != "":
+                if "publication comment" in row and str(row["publication comment"]) != "nan":
                     publications[0]["comment"] = row["publication comment"]
 
                 # Append the publication number of families only if the PMID is valid
-                if "publication families" in row and row["publication families"] != "":
+                if "publication families" in row and str(row["publication families"]) != "nan":
                     publications[0]["families"] = row["publication families"]
 
                 # Append the publication number of affected individuals only if the PMID is valid
-                if "publication affected individuals" in row and row["publication affected individuals"] != "":
+                if "publication affected individuals" in row and str(row["publication affected individuals"]) != "nan":
                     publications[0]["affectedIndividuals"] = row["publication affected individuals"]
                 
-                # Append the publication consanguineous only if the PMID is valid
-                if "publication consanguineous" in row and row["publication consanguineous"] != "":
-                    publications[0]["consanguineous"] = row["publication consanguineous"]
+                # Append the publication consanguinity only if the PMID is valid
+                if "publication consanguinity" in row and str(row["publication consanguinity"]) != "nan":
+                    publications[0]["consanguineous"] = row["publication consanguinity"]
 
-                publications[0]["ancestries"] = "" # TODO
+                # Append the publication ancestry only if the PMID is valid
+                if "publication ancestry" in row and str(row["publication ancestry"]) != "nan":
+                    publications[0]["ancestries"] = row["publication ancestry"]
 
             # Validate the mechanism evidence (if applicable)
             # The evidence is linked to the publication
@@ -214,7 +249,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
             mechanism_evidence = []
             if valid_record and "molecular mechanism evidence (by PMID)" in row and str(row["molecular mechanism evidence (by PMID)"]) != "nan":
                 evidence_obj = {
-                    "pmid": row['publication PMID'],
+                    "pmid": row['publication'],
                     "description": "",
                     "evidence_types": []
                 }
@@ -241,7 +276,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
 
             # Get disease OMIM/Mondo IDs
             cross_references = []
-            if row["disease mim"]:
+            if "disease mim" in row and str(row["disease mim"]) != "nan":
                 try:
                     omim_disease_name = g2p_disease_ids[str(row["disease mim"])]
                 except KeyError:
@@ -255,7 +290,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                         "disease_name": omim_disease_name,
                         "original_disease_name": omim_disease_name
                     })
-            if row["disease MONDO"]:
+            if "disease MONDO" in row and str(row["disease MONDO"]) != "nan":
                 try:
                     mondo_disease_name = g2p_disease_ids[row["disease MONDO"]]
                 except KeyError:
@@ -272,15 +307,16 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
 
             # Get cross cutting modifier
             cross_cutting_modifier = []
-            for ccm in re.split(r'\;\s*', row["cross cutting modifier"]):
-                try:
-                    g2p_attribs["cross_cutting_modifier"][ccm]
-                except KeyError:
-                    message = f"Invalid cross cutting modifier '{ccm}'"
-                    errors.append(message)
-                    valid_record = False
-                else:
-                    cross_cutting_modifier.append(ccm)
+            if "cross cutting modifier" in row and str(row["cross cutting modifier"]) != "nan":
+                for ccm in re.split(r'\;\s*', row["cross cutting modifier"]):
+                    try:
+                        g2p_attribs["cross_cutting_modifier"][ccm]
+                    except KeyError:
+                        message = f"Invalid cross cutting modifier '{ccm}'"
+                        errors.append(message)
+                        valid_record = False
+                    else:
+                        cross_cutting_modifier.append(ccm)
 
             # Validate phenotypes
             # Example: 'HP:0001897;HP:0000098'
@@ -299,7 +335,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                             "accession": hpo_id
                         })
                 phenotypes.append({
-                    "pmid": row["publication PMID"],
+                    "pmid": row["publication"],
                     "summary": "",
                     "hpo_terms": hpo_terms
                 })
@@ -309,10 +345,8 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
             if "variant description (by PMID)" in row and str(row["variant description (by PMID)"]) != "nan":
                 variant_descriptions.append({
                     "description": row["variant description (by PMID)"].strip(),
-                    "publication": row["publication PMID"]
+                    "publication": row["publication"]
                 })
-
-            key = row["gene symbol"]+"-"+row["disease name"]+"-"+row["allelic requirement"]+"-"+row["molecular mechanism"]
 
             # Validate variant types - linked to the publication
             # Example: 'inframe_insertion (unknown_inheritance); inframe_deletion'
@@ -356,7 +390,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                         for existing_var_type in existing_variant_types:
                             if variant_type_clean == existing_var_type["secondary_type"]:
                                 new = False
-                                existing_var_type["supporting_papers"].append(row["publication PMID"])
+                                existing_var_type["supporting_papers"].append(row["publication"])
                             new_variant_types_list.append(existing_var_type)
                         
                         if new:
@@ -367,7 +401,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                             "nmd_escape": False, # TODO
                             "primary_type": "",
                             "secondary_type": variant_type_clean,
-                            "supporting_papers": [row["publication PMID"]],
+                            "supporting_papers": [row["publication"]],
                             "unknown_inheritance": unknown_inheritance
                         })
                         variant_types = new_variant_types_list
@@ -380,7 +414,7 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                             "nmd_escape": False, # TODO
                             "primary_type": "",
                             "secondary_type": variant_type_clean,
-                            "supporting_papers": [row["publication PMID"]],
+                            "supporting_papers": [row["publication"]],
                             "unknown_inheritance": unknown_inheritance
                         })
                         variant_types = new_variant_types_list
@@ -448,6 +482,12 @@ def prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_
                 wr.write(f"Cannot load record: {';'.join(errors)}\n")
                 can_import = False
 
+                if key not in invalid_records:
+                    invalid_records[key] = 1
+
+    global n_invalid_records
+    n_invalid_records = len(invalid_records)
+
     return records_to_load, can_import
 
 def load_data(api_url, api_username, api_password, records_to_load):
@@ -468,7 +508,7 @@ def load_data(api_url, api_username, api_password, records_to_load):
             data_to_add = { "json_data":records_to_load[record] }
             try:
                 # Create the curation record
-                response_update = requests.post(
+                response_create_draft = requests.post(
                     api_url + create_curation_url,
                     json=data_to_add,
                     cookies=requests.utils.dict_from_cookiejar(response.cookies)
@@ -476,8 +516,9 @@ def load_data(api_url, api_username, api_password, records_to_load):
             except Exception as e:
                 print(f"Record: {record}; Error:", e)
             else:
-                if response_update.status_code == 200:
-                    response_json = response_update.json()
+                # The endpoint to create drafts returns 201 when a draft is successfully created
+                if response_create_draft.status_code == 201:
+                    response_json = response_create_draft.json()
                     new_g2p_record = response_json["result"]
                     try:
                         # Publish the record
@@ -493,14 +534,42 @@ def load_data(api_url, api_username, api_password, records_to_load):
                         else:
                             print(f"Failed to publish {new_g2p_record}:", response_publish.status_code, response_publish.json())
                 else:
-                    print(f"Failed to create curation record {record}:", response_update.status_code, response_update.json())
+                    print(f"Failed to create curation record {record}:", response_create_draft.status_code, response_create_draft.json())
     else:
         print("Error: cannot login into G2P")
 
     return records_created
 
+def dump_g2p_records(db_host, db_port, db_name, user, password):
+    g2p_records = {}
 
-def fetch_g2p_attribs(db_host, db_port, db_name, user, password):
+    sql_lgd = """
+                SELECT l.name, d.name, a2.value, a.value, m.value, g.stable_id, lgd.is_deleted FROM locus_genotype_disease lgd
+                LEFT JOIN locus l ON l.id = lgd.locus_id
+                LEFT JOIN disease d ON d.id = lgd.disease_id
+                LEFT JOIN attrib a ON a.id = lgd.confidence_id
+                LEFT JOIN attrib a2 ON a2.id = lgd.genotype_id
+                LEFT JOIN cv_molecular_mechanism m ON m.id = lgd.mechanism_id
+                LEFT JOIN g2p_stableid g ON g.id = lgd.stable_id
+              """
+
+    db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
+    cursor = db.cursor()
+
+    # Fetch all attribs
+    cursor.execute(sql_lgd)
+    data = cursor.fetchall()
+    for row in data:
+        key = row[0]+"-"+row[1]+"-"+row[2]+"-"+row[4]
+        if key not in g2p_records:
+            g2p_records[key] = {
+                "stable_id": row[5],
+                "is_deleted": row[6]
+            }
+
+    return g2p_records
+
+def dump_g2p_attribs(db_host, db_port, db_name, user, password):
     g2p_attribs = {}
 
     sql_attribs = """
@@ -524,7 +593,7 @@ def fetch_g2p_attribs(db_host, db_port, db_name, user, password):
 
     return g2p_attribs
 
-def fetch_g2p_mechanisms(db_host, db_port, db_name, user, password):
+def dump_g2p_mechanisms(db_host, db_port, db_name, user, password):
     g2p_mechanisms = {}
 
     sql_mechanism = """
@@ -551,7 +620,7 @@ def fetch_g2p_mechanisms(db_host, db_port, db_name, user, password):
 
     return g2p_mechanisms
 
-def fetch_g2p_genes(db_host, db_port, db_name, user, password):
+def dump_g2p_genes(db_host, db_port, db_name, user, password):
     g2p_genes = {}
 
     sql_attribs = """
@@ -571,7 +640,7 @@ def fetch_g2p_genes(db_host, db_port, db_name, user, password):
 
     return g2p_genes
 
-def fetch_g2p_panels(db_host, db_port, db_name, user, password):
+def dump_g2p_panels(db_host, db_port, db_name, user, password):
     g2p_panels = {}
 
     sql_panels = """ SELECT id, name FROM panel """
@@ -587,7 +656,7 @@ def fetch_g2p_panels(db_host, db_port, db_name, user, password):
 
     return g2p_panels
 
-def fetch_g2p_ontology(db_host, db_port, db_name, user, password):
+def dump_g2p_ontology(db_host, db_port, db_name, user, password):
     g2p_ontology = {}
 
     sql_ontology = """ SELECT o.id, o.term FROM ontology_term o
@@ -606,7 +675,7 @@ def fetch_g2p_ontology(db_host, db_port, db_name, user, password):
 
     return g2p_ontology
 
-def fetch_g2p_disease_ids(db_host, db_port, db_name, user, password):
+def dump_g2p_disease_ids(db_host, db_port, db_name, user, password):
     g2p_ext_ids = {}
 
     sql_disease = """ SELECT identifier, disease
@@ -695,36 +764,55 @@ def main():
 
     data_to_load = read_file(file)
 
+    # Pre-fetch G2P records
+    g2p_records = dump_g2p_records(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P attribs (genotype, mechanism, confidence, etc.)
-    g2p_attribs = fetch_g2p_attribs(db_host, db_port, db_name, user, password)
+    g2p_attribs = dump_g2p_attribs(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P genes
-    g2p_genes = fetch_g2p_genes(db_host, db_port, db_name, user, password)
+    g2p_genes = dump_g2p_genes(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P panels
-    g2p_panels = fetch_g2p_panels(db_host, db_port, db_name, user, password)
+    g2p_panels = dump_g2p_panels(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P ontology terms
-    g2p_ontology = fetch_g2p_ontology(db_host, db_port, db_name, user, password)
+    g2p_ontology = dump_g2p_ontology(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P OMIM/Mondo IDs
-    g2p_disease_ids = fetch_g2p_disease_ids(db_host, db_port, db_name, user, password)
+    g2p_disease_ids = dump_g2p_disease_ids(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P mechanism attribs
-    g2p_mechanisms = fetch_g2p_mechanisms(db_host, db_port, db_name, user, password)
+    g2p_mechanisms = dump_g2p_mechanisms(db_host, db_port, db_name, user, password)
 
     # Prepare the data to be imported
-    records_to_load, can_import = prepare_data(api_url, data_to_load, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report)
+    records_to_load, can_import = prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report)
+
+    n_records_to_load = len(records_to_load)
 
     if dryrun:
+        print("Dryrun > Report counts:")
+        print("    Total number of records:", n_records_to_load + n_invalid_records)
+        print("    Number of records to load:", n_records_to_load)
+
         if can_import:
-            print("Dryrun > records to load into G2P:")
+            print("Records to load into G2P:")
             for key in records_to_load:
                 print(key)
         else:
-            print(f"Dryrun > please check file '{report}' for details.")
+            print("    Number of invalid records:", n_invalid_records)
+            print(f"Please check file '{report}' for more details.")
+
     # Import records
     elif can_import:
         print("Loading records into G2P...")
-        load_data(api_url, api_username, api_password, records_to_load)
+        records_created = load_data(api_url, api_username, api_password, records_to_load)
         print("Loading records into G2P... done")
+        print("\nTotal number of records:", n_records_to_load + n_invalid_records)
+        print("Number of records created:", len(records_created))
+        print("List of records:")
+        for stable_id in records_created:
+            print(stable_id)
+
     # Not possible to import records
     elif not can_import:
+        print("Total number of records:", n_records_to_load + n_invalid_records)
+        print("Number of records to load:", n_records_to_load)
+        print("Number of invalid records:", n_invalid_records)
         print(f"Cannot load records into G2P. Please check file '{report}' for more details.")
 
 if __name__ == '__main__':
