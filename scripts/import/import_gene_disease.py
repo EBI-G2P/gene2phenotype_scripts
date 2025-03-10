@@ -38,8 +38,8 @@ from os import listdir
                             g2p_user = <>
                             g2p_password = <>
 
-                --omim: Option to import OMIM gene-disease data (default=1)
-                --mondo: Option to import MONDO gene-disease data (default=1)
+                --skip-omim: Option to skip OMIM gene-disease data import (default=off)
+                --skip-mondo: Option to skip MONDO gene-disease data import (default=off)
                 --mondo_file: MONDO file. Supported format: owl. Only necessary when importing mondo (--mondo).
                 --full_import: Option to run a full import of the data. By default, the script runs a data update (default=0)
 """
@@ -572,18 +572,15 @@ def split_mondo_file(file):
 def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--config", required=True, help="Config file with details to Ensembl and G2P databases")
-    parser.add_argument("--omim", default=1, help="Import OMIM gene-disease data")
-    parser.add_argument("--mondo", default=1, help="Import MONDO gene-disease data")
+    parser.add_argument("--skip_omim", dest="omim", action="store_false", help="Skip importing OMIM gene-disease data (default: off)")
+    parser.add_argument("--skip_mondo", dest="mondo", action="store_false", help="Skip importing Mondo gene-disease data (default: off)")
     parser.add_argument("--mondo_file", default='', help="MONDO file in the format: owl")
-    parser.add_argument("--full_import", required=False, default=0, help="Run a full import (default: 0)")
+    parser.add_argument("--full_import", dest="update_mode", action="store_false", help="Run a full import (default: off)")
 
     args = parser.parse_args()
 
     config_file = args.config
-    import_omim = int(args.omim)
-    import_mondo = int(args.mondo)
     mondo_file = args.mondo_file
-    run_import = int(args.full_import)
 
     # Load the config file
     config = configparser.ConfigParser()
@@ -600,15 +597,17 @@ def main():
     g2p_user = config['g2p_database']['g2p_user']
     g2p_password = config['g2p_database']['g2p_password']
 
-    update_mode = 1
-    if run_import == 1:
-        update_mode = 0
+    update_mode = 0
+    run_import = 1
+    if args.update_mode:
+        run_import = 0
+        update_mode = 1
 
     # Fetch gene-disease import info from G2P
     g2p_meta_info = get_g2p_meta(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password)
 
     ### Import or update OMIM ###
-    if import_omim == 1:
+    if args.omim:
         # Get version from Ensembl db name
         version = re.search("[0-9]+", db_name)
         print(f"INFO: going to import OMIM data from Ensembl {version.group()}")
@@ -645,9 +644,10 @@ def main():
             print("> Running OMIM update")
             # Update OMIM gene-disease data in G2P db
             update_mim_gene_diseases(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, gene_diseases, version.group())
+            print("> Running OMIM update... done")
 
     ### Import or update Mondo ###
-    if import_mondo == 1:
+    if args.mondo:
         """
             Input file: it is necessary to perform some cleaning before the import.
             The Mondo file should only have the following type of entries:
