@@ -71,12 +71,7 @@ def get_g2p_meta(db_host, db_port, db_name, user, password):
         version = row[1]
         date_update = row[2]
 
-        if source_name not in meta_info:
-            meta_info[source_name] = { 
-                "data_version": version,
-                "date_update": date_update
-            }
-        elif date_update > meta_info[source_name]["date_update"]:
+        if source_name not in meta_info or date_update > meta_info[source_name]["date_update"]:
             meta_info[source_name] = { 
                 "data_version": version,
                 "date_update": date_update
