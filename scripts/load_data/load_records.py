@@ -57,7 +57,7 @@ def read_file(file):
 
     # Validate the file format
     header = file_data[0].keys()
-    mandatory_fields = ["gene symbol", "hgnc id", "disease name", "allelic requirement", "molecular mechanism", "confidence",
+    mandatory_fields = ["gene symbol", "disease name", "allelic requirement", "molecular mechanism", "confidence",
                         "publication", "panel", "inferred variant consequence", "evidence based variant consequence"]
 
     if not all(column in header for column in mandatory_fields):
@@ -122,7 +122,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                 errors.append(message)
                 valid_record = False
             else:
-                if row["molecular mechanism evidence (by PMID)"]:
+                if row["publication molecular mechanism evidence"]:
                     support = "evidence"
                 molecular_mechanism = {
                     "name": row["molecular mechanism"],
@@ -240,21 +240,21 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                     publications[0]["consanguineous"] = row["publication consanguinity"]
 
                 # Append the publication ancestry only if the PMID is valid
-                if "publication ancestry" in row and str(row["publication ancestry"]) != "nan":
-                    publications[0]["ancestries"] = row["publication ancestry"]
+                if "publication families ancestry" in row and str(row["publication families ancestry"]) != "nan":
+                    publications[0]["ancestries"] = row["publication families ancestry"]
 
             # Validate the mechanism evidence (if applicable)
             # The evidence is linked to the publication
             # Example: 'Function:Biochemical,protein interaction;Rescue:Non-Human Model Organism'
             mechanism_evidence = []
-            if valid_record and "molecular mechanism evidence (by PMID)" in row and str(row["molecular mechanism evidence (by PMID)"]) != "nan":
+            if valid_record and "publication molecular mechanism evidence" in row and str(row["publication molecular mechanism evidence"]) != "nan":
                 evidence_obj = {
                     "pmid": row['publication'],
                     "description": "",
                     "evidence_types": []
                 }
 
-                for m_evidence in re.split(r'\;\s*', row["molecular mechanism evidence (by PMID)"]):
+                for m_evidence in re.split(r'\;\s*', row["publication molecular mechanism evidence"]):
                     evidence_type, evidence_values = re.split(r'\:\s*', m_evidence)
                     evidence_final_list = []
                     for value in re.split(r'\,\s*', evidence_values):
@@ -321,9 +321,9 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
             # Validate phenotypes
             # Example: 'HP:0001897;HP:0000098'
             phenotypes = []
-            if "phenotypes (by PMID)" in row and str(row["phenotypes (by PMID)"]) != "nan":
+            if "publication phenotypes" in row and str(row["publication phenotypes"]) != "nan":
                 hpo_terms = []
-                for hpo_id in re.split(r'\;\s*', row["phenotypes (by PMID)"]):
+                for hpo_id in re.split(r'\;\s*', row["publication phenotypes"]):
                     hpo_response = validate_phenotype(hpo_id)
                     if not hpo_response:
                         message = f"Invalid phenotype '{hpo_id}'"
@@ -342,23 +342,24 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Validate variant descriptions (HGVS)
             variant_descriptions = []
-            if "variant description (by PMID)" in row and str(row["variant description (by PMID)"]) != "nan":
-                variant_descriptions.append({
-                    "description": row["variant description (by PMID)"].strip(),
-                    "publication": row["publication"]
-                })
+            if "publication variant descriptions" in row and str(row["publication variant descriptions"]) != "nan":
+                for hgvs in re.split(r'\;\s*', row["publication variant descriptions"]):
+                    variant_descriptions.append({
+                        "description": hgvs,
+                        "publication": row["publication"]
+                    })
 
             # Validate variant types - linked to the publication
             # Example: 'inframe_insertion (unknown_inheritance); inframe_deletion'
             variant_types = []
-            if "variant types (by PMID)" in row and str(row["variant types (by PMID)"]) != "nan":
+            if "publication variant types" in row and str(row["publication variant types"]) != "nan":
                 # The structure of the variant types is different - we have to use the key now to get the existing variant
                 # types for this variant
                 existing_variant_types = None
                 if key in records_to_load and valid_record:
                     existing_variant_types = records_to_load[key]["variant_types"]
 
-                for var_type in re.split(r'\;\s*', row["variant types (by PMID)"]):
+                for var_type in re.split(r'\;\s*', row["publication variant types"]):
                     de_novo = False
                     inherited = False
                     unknown_inheritance = False
