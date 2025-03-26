@@ -566,6 +566,7 @@ def main():
     # Check again each table with locus id if all data in that column exists in the locus table
     locus_id_foreign_key_check(db_host, db_port, db_name, user, password, g2p_tables_with_locus_id_link)
 
+    # TODO: update meta
 
 if __name__ == '__main__':
     main()
