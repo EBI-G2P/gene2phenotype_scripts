@@ -268,7 +268,7 @@ def get_mondo_gene_diseases(file):
     """
         Retrieve the gene-disease associations from the Mondo file (owl format).
         This method also retrieves all Mondo IDs excluding 'obsolete' - this data will
-        be used to populate table 'external_disease'.
+        be used to populate table 'disease_external'.
 
         Returns a tuple of dictionaries with the following structure
         - results (dict)
@@ -535,11 +535,11 @@ def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
     db.close()
 
 def populate_mondo_all_diseases(db_host, db_port, db_name, user, password, mondo_all_diseases):
-    sql_ins_mondo = """ INSERT INTO external_disease(disease, identifier, source_id)
+    sql_ins_mondo = """ INSERT INTO disease_external(disease, identifier, source_id)
                         VALUES(%s, %s, %s)
                     """
 
-    sql_truncate =  """ TRUNCATE TABLE external_disease """
+    sql_truncate =  """ TRUNCATE TABLE disease_external """
 
     sql_source = """ SELECT id FROM source WHERE name = 'Mondo' """
 
@@ -726,11 +726,11 @@ def main():
             mondo_gene_diseases, mondo_all_diseases = get_mondo_gene_diseases(mondo_file)
             print("Getting Mondo gene-disease associations... done")
 
-            # We store all Mondo IDs in the table 'external_disease'
+            # We store all Mondo IDs in the table 'disease_external'
             # These IDs are not linked to any gene or other data
-            print("> Populating table 'external_disease' with all Mondo IDs...")
+            print("> Populating table 'disease_external' with all Mondo IDs...")
             populate_mondo_all_diseases(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, mondo_all_diseases)
-            print("> Populating table 'external_disease' with all Mondo IDs... done")
+            print("> Populating table 'disease_external' with all Mondo IDs... done")
 
         # Run the import
         if run_import == 1:
