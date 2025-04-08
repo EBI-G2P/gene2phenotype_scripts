@@ -38,8 +38,8 @@ from os import listdir
                             g2p_user = <>
                             g2p_password = <>
 
-                --skip-omim: Option to skip OMIM gene-disease data import (default=off)
-                --skip-mondo: Option to skip MONDO gene-disease data import (default=off)
+                --skip_omim: Option to skip OMIM gene-disease data import (default=off)
+                --skip_mondo: Option to skip MONDO gene-disease data import (default=off)
                 --mondo_file: MONDO file. Supported format: owl. Only necessary when importing mondo (--mondo).
                 --full_import: Option to run a full import of the data. By default, the script runs a data update (default=0)
 """
@@ -266,14 +266,21 @@ def update_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_dis
 
 def get_mondo_gene_diseases(file):
     """
-        Retrieve the gene-disease association from the Mondo file (owl format)
+        Retrieve the gene-disease associations from the Mondo file (owl format).
+        This method also retrieves all Mondo IDs excluding 'obsolete' - this data will
+        be used to populate table 'external_disease'.
 
-        Returns a dict with the following structure
+        Returns a tuple of dictionaries with the following structure
+        - results (dict)
             key: (string) Mondo ID
             value: (dict) { "disease_name": name of disease, "hgnc_id": HGNC ID }
+        - all_diseases (dict)
+            key: (string) Mondo ID
+            value: (string) name of disease
     """
 
     results = {}
+    all_diseases = {}
 
     # Open the tmp dir where all the input files are saved
     for tmp_file in listdir("tmp/"):
@@ -352,10 +359,12 @@ def get_mondo_gene_diseases(file):
 
                 if is_element is not None and disease_name is not None and hgnc_id is not None and is_element not in results:
                     results[is_element] = { "disease": disease_name, "hgnc_id": hgnc_id }
+                if is_element is not None and disease_name is not None and is_element not in results and not disease_name.startswith("obsolete"):
+                    all_diseases[is_element] = disease_name
 
             fh.close()
 
-    return results
+    return results, all_diseases
 
 def insert_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, mondo_version):
     """
@@ -525,6 +534,37 @@ def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
     db.commit()
     db.close()
 
+def populate_mondo_all_diseases(db_host, db_port, db_name, user, password, mondo_all_diseases):
+    sql_ins_mondo = """ INSERT INTO external_disease(disease, identifier, source_id)
+                        VALUES(%s, %s, %s)
+                    """
+
+    sql_truncate =  """ TRUNCATE TABLE external_disease """
+
+    sql_source = """ SELECT id FROM source WHERE name = 'Mondo' """
+
+    db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
+    cursor = db.cursor()
+    # Fetch source id
+    cursor.execute(sql_source)
+    data_source = cursor.fetchone()
+    source_id = data_source[0]
+
+    # Truncate table
+    cursor.execute(sql_truncate)
+    db.commit()
+
+    # Prepare input data
+    input_data = []
+    for mondo_disease in mondo_all_diseases:
+        new_data = (mondo_all_diseases[mondo_disease], mondo_disease, source_id)
+        input_data.append(new_data)
+
+    # Insert data
+    cursor.executemany(sql_ins_mondo, input_data)
+    db.commit()
+    db.close()
+
 def fetch_mondo_version(file):
     """
         Fetch the Mondo data version from the input file
@@ -683,8 +723,14 @@ def main():
 
             # Retrive Mondo gene-disease from Mondo owl file
             print("Getting Mondo gene-disease associations...")
-            mondo_gene_diseases = get_mondo_gene_diseases(mondo_file)
+            mondo_gene_diseases, mondo_all_diseases = get_mondo_gene_diseases(mondo_file)
             print("Getting Mondo gene-disease associations... done")
+
+            # We store all Mondo IDs in the table 'external_disease'
+            # These IDs are not linked to any gene or other data
+            print("> Populating table 'external_disease' with all Mondo IDs...")
+            populate_mondo_all_diseases(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, mondo_all_diseases)
+            print("> Populating table 'external_disease' with all Mondo IDs... done")
 
         # Run the import
         if run_import == 1:
