@@ -10,7 +10,7 @@ import gzip
 import re
 
 
-def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: str, password: str, g2p_tables_with_locus_id_link: list) -> None:
+def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: str, password: str, g2p_tables_with_locus_id_link: list)-> None:
     """
     Run a FK check on the tables that have a link to the locus table.
 
@@ -32,7 +32,7 @@ def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: s
         if table.startswith("locus_") or table.startswith("gene2phenotype_app_"):
             column_name = "locus_id"
 
-        sql =   f"""
+        sql =  f"""
                     SELECT COUNT(t.id) FROM {table} t
                     LEFT JOIN locus l ON l.id = t.{column_name}
                     WHERE l.id IS NULL AND t.{column_name} IS NOT NULL
@@ -46,20 +46,18 @@ def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: s
     db.close()
 
 
-def read_from_gtf(ensembl_gtf: str, exclude_biotypes: list) -> dict[str, dict]:
+def read_from_gtf(working_dir: str, ensembl_gtf: str, exclude_biotypes: list) -> dict[str, dict]:
     """
     Method to read the Ensembl GTF file and create a list if genes to import/update.
 
     Args:
+        working_dir (str): working directory
         ensembl_gtf (str): GTF file from Ensembl
         exclude_biotypes (list): list of biotypes to exclude from the update
 
     Returns:
         dict[str, dict]: dictionary of genes to import/update
     """
-
-    genes_output_file = f"{working_dir}/ensembl_genes_grch38.txt"
-    error_log_file = f"{working_dir}/ensembl_genes_grch38_error.log"
 
     gene_symbol_2_stable_id = {}
     gene_symbol_details = {}
@@ -84,7 +82,9 @@ def read_from_gtf(ensembl_gtf: str, exclude_biotypes: list) -> dict[str, dict]:
                 "gene_biotype" in attribs_list and attribs_list["gene_biotype"] and
                 not any(re.search(sub, attribs_list["gene_biotype"]) for sub in exclude_biotypes)):
 
-                if attribs_list["gene_name"] not in gene_symbol_2_stable_id:
+                try:
+                    gene_symbol_2_stable_id[attribs_list["gene_name"]]
+                except KeyError:
                     gene_symbol_2_stable_id[attribs_list["gene_name"]] = set()
                     gene_symbol_2_stable_id[attribs_list["gene_name"]].add(attribs_list["gene_id"])
                     # Save the chr details for each gene symbol
@@ -96,6 +96,10 @@ def read_from_gtf(ensembl_gtf: str, exclude_biotypes: list) -> dict[str, dict]:
                     }
                 else:
                     gene_symbol_2_stable_id[attribs_list["gene_name"]].add(attribs_list["gene_id"])
+
+    # Write report files
+    genes_output_file = os.path.join(working_dir, "ensembl_genes_grch38.txt")
+    error_log_file = os.path.join(working_dir, "ensembl_genes_grch38_error.log")
 
     with open(error_log_file, "w") as wr, open(genes_output_file, "w") as wr_genes:
         for gene_symbol in gene_symbol_2_stable_id:
@@ -202,7 +206,9 @@ def get_g2p_genes_hgnc(db_host: str, db_port: int, db_name: str, user: str, pass
     cursor.execute(sql)
     data = cursor.fetchall()
     for row in data:
-        if row[0] not in g2p_genes_by_symbol:
+        try:
+            g2p_genes_by_symbol[row[0]]
+        except KeyError:
             g2p_genes_by_symbol[row[0]] = {
                 "stable_id": row[1],
                 "locus_id": row[2],
@@ -265,7 +271,7 @@ def get_g2p_genes_not_used(db_host: str, db_port: int, db_name: str, user: str, 
     return g2p_genes_not_used
 
 
-def update_genes(g2p_gene_ids: dict[str, dict], g2p_genes_by_symbol: dict[str, str], unique_stable_id_2_gene_symbol: dict[str, dict], db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
+def update_genes(working_dir: str, g2p_gene_ids: dict[str, dict], g2p_genes_by_symbol: dict[str, str], unique_stable_id_2_gene_symbol: dict[str, dict], db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
     """
     Method to run the genes update.
     It writes two report files:
@@ -273,6 +279,7 @@ def update_genes(g2p_gene_ids: dict[str, dict], g2p_genes_by_symbol: dict[str, s
         report_new_genes.txt
 
     Args:
+        working_dir (str): working directory
         g2p_gene_ids (dict[str, dict]): complete dictionary of genes data where the key is the symbol
         g2p_genes_by_symbol (dict[str, str]): dictionary of genes where the key is the symbol and value is the Ensembl ID
         unique_stable_id_2_gene_symbol (dict[str, dict]): dictionary of genes to import/update
@@ -283,8 +290,8 @@ def update_genes(g2p_gene_ids: dict[str, dict], g2p_genes_by_symbol: dict[str, s
         password (str): password
     """
 
-    update_report = f"{working_dir}/report_gene_updates.txt"
-    new_genes_report = f"{working_dir}/report_new_genes.txt"
+    update_report = os.path.join(working_dir, "report_gene_updates.txt")
+    new_genes_report = os.path.join(working_dir, "report_new_genes.txt")
 
     sequence_chrs = {}
 
@@ -353,7 +360,7 @@ def update_genes(g2p_gene_ids: dict[str, dict], g2p_genes_by_symbol: dict[str, s
 
             try:
                 g2p_gene_symbol = g2p_gene_ids[stable_id]["gene_symbol"]
-            except:
+            except KeyError:
                 # The stable_id is not found in G2P, it could mean one of the following:
                 # 1) gene is in g2p but in the gtf file the stable id has been updated for the gene symbol
                 # 2) this is a new gene
@@ -431,7 +438,7 @@ def looks_like_identifier(symbol: str) -> bool:
     return bool(re.match(r'^[A-Z]+[0-9]+\.[0-9]+', symbol))
 
 
-def update_xrefs(hgnc_file: str, db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
+def update_xrefs(working_dir: str, hgnc_file: str, db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
     """
     Main method to update the genes identifiers and adds more gene symbols.
     This method calls:
@@ -441,6 +448,7 @@ def update_xrefs(hgnc_file: str, db_host: str, db_port: int, db_name: str, user:
     It writes a report to report_hgnc_updates.txt 
 
     Args:
+        working_dir (str): working directory
         hgnc_file (str): File containing the HGNC data
         db_host (str): G2P host name
         db_port (int): port number
@@ -449,7 +457,7 @@ def update_xrefs(hgnc_file: str, db_host: str, db_port: int, db_name: str, user:
         password (str): password
     """
 
-    report_hgnc_file = f"{working_dir}/report_hgnc_updates.txt"
+    report_hgnc_file = os.path.join(working_dir, "report_hgnc_updates.txt")
 
     # Get a new dump of the g2p genes - after they were updated with the gft file
     g2p_genes_by_symbol = get_g2p_genes_hgnc(db_host, db_port, db_name, user, password)
@@ -469,7 +477,7 @@ def update_xrefs(hgnc_file: str, db_host: str, db_port: int, db_name: str, user:
             for id_type in ["hgnc_id", "prev_symbol", "ensembl_gene_id", "omim_id"]:
                 try:
                     value = data[id_type]
-                except:
+                except KeyError:
                     continue
                 else:
                     # clean the value before saving it
@@ -488,7 +496,7 @@ def update_xrefs(hgnc_file: str, db_host: str, db_port: int, db_name: str, user:
             # Get current g2p data for this gene symbol
             try: 
                 g2p_data = g2p_genes_by_symbol[symbol]
-            except:
+            except KeyError:
                 continue
             else:
                 # Update or add HGNC ID
@@ -617,26 +625,25 @@ def main():
 
     config_file = args.config
     version = args.version
-    global working_dir
     working_dir = args.working_dir
 
     hgnc_file_url = "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
-    hgnc_file = f"{working_dir}/hgnc_complete_set.txt"
-    ensembl_gtf_url = f"https://ftp.ensembl.org/pub/release-{version}/gtf/homo_sapiens/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
-    ensembl_gtf = f"{working_dir}/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
+    hgnc_file = os.path.join(working_dir, "hgnc_complete_set.txt")
+    ensembl_gtf_url = os.path.join(working_dir, "https://ftp.ensembl.org/pub/release-{version}/gtf/homo_sapiens/Homo_sapiens.GRCh38.{version}.chr.gtf.gz")
+    ensembl_gtf = os.path.join(working_dir, "Homo_sapiens.GRCh38.{version}.chr.gtf.gz")
 
     if not os.path.exists(working_dir):
         sys.exit(f"Invalid directory '{working_dir}'")
 
     try:
         urllib.request.urlretrieve(hgnc_file_url, hgnc_file)
-    except:
-        sys.exit(f"Problem while fetching HGNC file '{hgnc_file_url}'")
+    except (urllib.error.URLError, urllib.error.HTTPError) as error:
+        sys.exit(f"Problem while fetching HGNC file '{hgnc_file_url}': {error}")
 
     try:
         urllib.request.urlretrieve(ensembl_gtf_url, ensembl_gtf)
-    except:
-        sys.exit(f"Problem while fetching Ensembl GTF file '{ensembl_gtf_url}'")
+    except (urllib.error.URLError, urllib.error.HTTPError) as error:
+        sys.exit(f"Problem while fetching Ensembl GTF file '{ensembl_gtf_url}': {error}")
 
     # Load the config file
     config = configparser.ConfigParser()
@@ -677,17 +684,17 @@ def main():
 
     # Get the Ensembl genes from the gtf file
     # Only considers genes that are linked to one Ensembl ID
-    unique_stable_id_2_gene_symbol = read_from_gtf(ensembl_gtf, exclude_biotypes)
+    unique_stable_id_2_gene_symbol = read_from_gtf(working_dir, ensembl_gtf, exclude_biotypes)
 
     # Update gene_symbol or if gene not in G2P insert new gene
     # don't update gene_symbol where readable gene_symbol has been replaced by e.g. AC080038.1 TODO: and gene_symbol is used by G2P
     # If the gene_symbol is already present in the locus table only update the ensembl stable_id
-    update_genes(g2p_gene_ids, g2p_genes_by_symbol, unique_stable_id_2_gene_symbol, db_host, db_port, db_name, user, password)
+    update_genes(working_dir, g2p_gene_ids, g2p_genes_by_symbol, unique_stable_id_2_gene_symbol, db_host, db_port, db_name, user, password)
 
     # Update the HGNC IDs
     # This update uses the gene symbol to compare the genes
     # We need a new dump of the genes (after all the previous updates)
-    update_xrefs(hgnc_file, db_host, db_port, db_name, user, password)
+    update_xrefs(working_dir, hgnc_file, db_host, db_port, db_name, user, password)
 
     # TODO
     # # Check if there are G2P genes that should be removed because they are not valid in the gtf file
