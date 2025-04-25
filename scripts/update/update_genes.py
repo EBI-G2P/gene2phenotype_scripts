@@ -9,7 +9,20 @@ import configparser
 import gzip
 import re
 
-def locus_id_foreign_key_check(db_host, db_port, db_name, user, password, g2p_tables_with_locus_id_link):
+
+def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: str, password: str, g2p_tables_with_locus_id_link: list) -> None:
+    """
+    Run a FK check on the tables that have a link to the locus table.
+
+    Args:
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+        g2p_tables_with_locus_id_link (list): list of G2P tables with a link to the locus table
+    """
+
     db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
     cursor = db.cursor()
 
@@ -32,9 +45,21 @@ def locus_id_foreign_key_check(db_host, db_port, db_name, user, password, g2p_ta
 
     db.close()
 
-def read_from_gtf(ensembl_gtf, exclude_biotypes):
-    genes_output_file = working_dir+"/ensembl_genes_grch38.txt"
-    error_log_file = working_dir+"/ensembl_genes_grch38_error.log"
+
+def read_from_gtf(ensembl_gtf: str, exclude_biotypes: list) -> dict[str, dict]:
+    """
+    Method to read the Ensembl GTF file and create a list if genes to import/update.
+
+    Args:
+        ensembl_gtf (str): GTF file from Ensembl
+        exclude_biotypes (list): list of biotypes to exclude from the update
+
+    Returns:
+        dict[str, dict]: dictionary of genes to import/update
+    """
+
+    genes_output_file = f"{working_dir}/ensembl_genes_grch38.txt"
+    error_log_file = f"{working_dir}/ensembl_genes_grch38_error.log"
 
     gene_symbol_2_stable_id = {}
     gene_symbol_details = {}
@@ -90,7 +115,25 @@ def read_from_gtf(ensembl_gtf, exclude_biotypes):
 
     return unique_stable_id_2_gene_symbol
 
-def get_g2p_genes(db_host, db_port, db_name, user, password):
+
+def get_g2p_genes(db_host: str, db_port: int, db_name: str, user: str, password: str) -> tuple[dict[str, dict], dict[str, str]]:
+    """
+    Method to fetch all the genes stored in the G2P database.
+    It returns the same information in two separate dictionaries with different formats:
+        g2p_genes: complete dictionary of genes data where the key is the symbol
+        g2p_genes_by_symbol: dictionary of genes where the key is the symbol and value is the Ensembl ID
+
+    Args:
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+
+    Returns:
+        tuple[dict[str, dict], dict[str, str]]: two dictionaries with the G2P genes data
+    """
+
     g2p_genes = {}
     g2p_genes_by_symbol = {}
 
@@ -120,12 +163,25 @@ def get_g2p_genes(db_host, db_port, db_name, user, password):
 
     return g2p_genes, g2p_genes_by_symbol
 
-def get_g2p_genes_hgnc(db_host, db_port, db_name, user, password):
+
+def get_g2p_genes_hgnc(db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, dict]:
     """
-        Dump the full G2P gene set.
-        Returns a dictionary where the key is the gene symbol.
-        Called by: update_xrefs()
+    Method to fetch the full G2P gene set with the HGNC and OMIM IDs.
+    Returns a dictionary where the key is the gene symbol.
+
+    Args:
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+
+    Returns:
+        dict[str, dict]: List of G2P genes with information about HGNC and OMIM IDs
+
+    Called by: update_xrefs()
     """
+
     g2p_genes_by_symbol = {}
 
     sql =   """
@@ -167,7 +223,22 @@ def get_g2p_genes_hgnc(db_host, db_port, db_name, user, password):
 
     return g2p_genes_by_symbol
 
-def get_g2p_genes_not_used(db_host, db_port, db_name, user, password):
+
+def get_g2p_genes_not_used(db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, str]:
+    """
+    Method to fetch a list of G2P genes that are not linked to any tables.
+
+    Args:
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+
+    Returns:
+        dict[str, str]: List of G2P genes not used in other tables
+    """
+
     g2p_genes_not_used = {}
 
     sql_not_used =   """
@@ -193,9 +264,27 @@ def get_g2p_genes_not_used(db_host, db_port, db_name, user, password):
 
     return g2p_genes_not_used
 
-def update_genes(g2p_gene_ids, g2p_genes_by_symbol, unique_stable_id_2_gene_symbol, db_host, db_port, db_name, user, password):
-    update_report = working_dir+"/report_gene_updates.txt"
-    new_genes_report = working_dir+"/report_new_genes.txt"
+
+def update_genes(g2p_gene_ids: dict[str, dict], g2p_genes_by_symbol: dict[str, str], unique_stable_id_2_gene_symbol: dict[str, dict], db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
+    """
+    Method to run the genes update.
+    It writes two report files:
+        report_gene_updates.txt
+        report_new_genes.txt
+
+    Args:
+        g2p_gene_ids (dict[str, dict]): complete dictionary of genes data where the key is the symbol
+        g2p_genes_by_symbol (dict[str, str]): dictionary of genes where the key is the symbol and value is the Ensembl ID
+        unique_stable_id_2_gene_symbol (dict[str, dict]): dictionary of genes to import/update
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+    """
+
+    update_report = f"{working_dir}/report_gene_updates.txt"
+    new_genes_report = f"{working_dir}/report_new_genes.txt"
 
     sequence_chrs = {}
 
@@ -334,11 +423,33 @@ def update_genes(g2p_gene_ids, g2p_genes_by_symbol, unique_stable_id_2_gene_symb
 
     db.close()
 
-def looks_like_identifier(symbol):
+
+def looks_like_identifier(symbol: str) -> bool:
+    """
+    Method to check if a string is a gene identifier.
+    """    
     return bool(re.match(r'^[A-Z]+[0-9]+\.[0-9]+', symbol))
 
-def update_xrefs(hgnc_file, db_host, db_port, db_name, user, password):
-    report_hgnc_file = working_dir+"/report_hgnc_updates.txt"
+
+def update_xrefs(hgnc_file: str, db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
+    """
+    Main method to update the genes identifiers and adds more gene symbols.
+    This method calls:
+        get_g2p_genes_hgnc()
+        update_g2p_identifier()
+        add_gene_synonym()
+    It writes a report to report_hgnc_updates.txt 
+
+    Args:
+        hgnc_file (str): File containing the HGNC data
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+    """
+
+    report_hgnc_file = f"{working_dir}/report_hgnc_updates.txt"
 
     # Get a new dump of the g2p genes - after they were updated with the gft file
     g2p_genes_by_symbol = get_g2p_genes_hgnc(db_host, db_port, db_name, user, password)
@@ -408,10 +519,22 @@ def update_xrefs(hgnc_file, db_host, db_port, db_name, user, password):
                             add_gene_synonym(gene_syn, g2p_data['locus_id'], db_host, db_port, db_name, user, password)
                             wr.write(f"ADD GENE PREV SYMBOL: locus_id = {g2p_data['locus_id']} gene symbol {symbol} prev symbol {gene_syn}\n")
 
-def update_g2p_identifier(type, new_hgnc_id, locus_id, db_host, db_port, db_name, user, password):
+
+def update_g2p_identifier(type: str, new_hgnc_id: str, locus_id: int, db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
     """
-        type: HGNC or OMIM
+    Method to run the sql queries to update the gene identifiers.
+
+    Args:
+        type (str): HGNC or OMIM
+        new_hgnc_id (str): new HGNC ID
+        locus_id (int): locus ID that is going to be updated
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
     """
+
     source_name, query_type = type.split("_")
 
     sql_source =    """
@@ -444,7 +567,20 @@ def update_g2p_identifier(type, new_hgnc_id, locus_id, db_host, db_port, db_name
     db.commit()
     db.close()
 
-def add_gene_synonym(symbol, locus_id, db_host, db_port, db_name, user, password):
+
+def add_gene_synonym(symbol: str, locus_id: int, db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
+    """
+    Method to run the sql query to add more gene symbols to the gene.
+
+    Args:
+        symbol (str): gene symbol
+        locus_id (int): locus ID that is going to be updated
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+    """    
 
     sql_sel_attribs =   """
                             SELECT id FROM attrib_type WHERE code = 'gene_synonym'
@@ -485,9 +621,9 @@ def main():
     working_dir = args.working_dir
 
     hgnc_file_url = "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
-    hgnc_file = working_dir+"/hgnc_complete_set.txt"
+    hgnc_file = f"{working_dir}/hgnc_complete_set.txt"
     ensembl_gtf_url = f"https://ftp.ensembl.org/pub/release-{version}/gtf/homo_sapiens/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
-    ensembl_gtf = working_dir+f"/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
+    ensembl_gtf = f"{working_dir}/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
 
     if not os.path.exists(working_dir):
         sys.exit(f"Invalid directory '{working_dir}'")
@@ -509,11 +645,11 @@ def main():
     try:
         g2p_db_details = config['g2p_database']
     except KeyError:
-        sys.exit("Config: G2P database details are missing from the config file")
+        sys.exit("Config: [g2p_database] is missing from the config file")
     else:
         db_host = g2p_db_details['host']
         db_port = int(g2p_db_details['port'])
-        db_name = g2p_db_details['database']
+        db_name = g2p_db_details['name']
         user = g2p_db_details['user']
         password = g2p_db_details['password']
 
