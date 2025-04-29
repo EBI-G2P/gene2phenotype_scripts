@@ -8,6 +8,7 @@ import urllib.request
 import configparser
 import gzip
 import re
+from datetime import datetime
 
 
 def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: str, password: str, g2p_tables_with_locus_id_link: list)-> None:
@@ -95,7 +96,16 @@ def read_from_gtf(working_dir: str, ensembl_gtf: str, exclude_biotypes: list) ->
                         "strand": data[6]
                     }
                 else:
-                    gene_symbol_2_stable_id[attribs_list["gene_name"]].add(attribs_list["gene_id"])
+                    start = int(data[3])
+                    end = int(data[4])
+                    # Genes in YPAR regions have the same gene symbol but different gene ID
+                    if ((data[0] == "X" and ((start >= 10001 and end <= 2781479) or
+                        (start >= 155701383 and end <= 156030895))) or
+                        (data[0] == "Y" and ((start >= 10001 and end <= 2781479) or
+                        (start >= 56887903 and end <= 57217415)))):
+                        print(f"INFO: YPAR {attribs_list["gene_id"]} ({attribs_list["gene_name"]})")
+                    else:
+                        gene_symbol_2_stable_id[attribs_list["gene_name"]].add(attribs_list["gene_id"])
 
     # Write report files
     genes_output_file = os.path.join(working_dir, "ensembl_genes_grch38.txt")
@@ -438,6 +448,25 @@ def looks_like_identifier(symbol: str) -> bool:
     return bool(re.match(r'^[A-Z]+[0-9]+\.[0-9]+', symbol))
 
 
+def delete_outdated_locus(db_host: str, db_port: int, db_name: str, user: str, password: str, g2p_gene_ids: dict[str, dict], unique_stable_id_2_gene_symbol: dict[str, dict]) -> None:
+    """
+    Method to delete the genes that are outdated, e.g. not found in the new GTF file.
+
+    Args:
+        g2p_gene_ids (dict[str, dict]): complete dictionary of genes data where the key is the symbol
+        unique_stable_id_2_gene_symbol (dict[str, dict]): dictionary of genes to import/update
+    """
+
+    # Fetch the list of genes that are not being used in any table
+    g2p_genes_not_used = get_g2p_genes_not_used(db_host, db_port, db_name, user, password)
+    for stable_id in g2p_gene_ids:
+        if stable_id not in unique_stable_id_2_gene_symbol:
+            gene_symbol = g2p_gene_ids[stable_id]["gene_symbol"]
+            print(f"---{stable_id} ({gene_symbol}) not found in gtf")
+            if stable_id in g2p_genes_not_used:
+                print(f"-> can be deleted {stable_id} ({gene_symbol}) from g2p")
+
+
 def update_xrefs(working_dir: str, hgnc_file: str, db_host: str, db_port: int, db_name: str, user: str, password: str) -> None:
     """
     Main method to update the genes identifiers and adds more gene symbols.
@@ -616,6 +645,41 @@ def add_gene_synonym(symbol: str, locus_id: int, db_host: str, db_port: int, db_
     db.close()
 
 
+def update_meta(db_host: str, db_port: int, db_name: str, user: str, password: str, version: str) -> None:
+    """
+    Method to add info about update to the meta table.
+
+    Args:
+        db_host (str): G2P host name
+        db_port (int): port number
+        db_name (str): G2P database name
+        user (str): user
+        password (str): password
+        version (str): Ensembl version
+    """
+
+    description = f"Update genes to Ensembl release {version}"
+
+    sql_version =   """
+                        SELECT id FROM source WHERE name = 'Ensembl'
+                    """
+
+    sql =   """
+                INSERT INTO meta(`key`, date_update, is_public, description, version, source_id)
+                VALUES(?,?,?,?,?,?)
+            """
+
+    db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
+    cursor = db.cursor()
+    # Fetch the Ensembl source_id
+    cursor.execute(sql_version)
+    source_id = cursor.fetchone()
+    # Add new row to meta
+    cursor.execute(sql, ["locus_gene_update", datetime.now(), 0, description, version, source_id[0]])
+    db.commit()
+    db.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--config", required=True, help="Config file")
@@ -629,8 +693,8 @@ def main():
 
     hgnc_file_url = "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
     hgnc_file = os.path.join(working_dir, "hgnc_complete_set.txt")
-    ensembl_gtf_url = os.path.join(working_dir, "https://ftp.ensembl.org/pub/release-{version}/gtf/homo_sapiens/Homo_sapiens.GRCh38.{version}.chr.gtf.gz")
-    ensembl_gtf = os.path.join(working_dir, "Homo_sapiens.GRCh38.{version}.chr.gtf.gz")
+    ensembl_gtf_url = f"https://ftp.ensembl.org/pub/release-{version}/gtf/homo_sapiens/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
+    ensembl_gtf = os.path.join(working_dir, f"Homo_sapiens.GRCh38.{version}.chr.gtf.gz")
 
     if not os.path.exists(working_dir):
         sys.exit(f"Invalid directory '{working_dir}'")
@@ -686,30 +750,28 @@ def main():
     # Only considers genes that are linked to one Ensembl ID
     unique_stable_id_2_gene_symbol = read_from_gtf(working_dir, ensembl_gtf, exclude_biotypes)
 
-    # Update gene_symbol or if gene not in G2P insert new gene
-    # don't update gene_symbol where readable gene_symbol has been replaced by e.g. AC080038.1 TODO: and gene_symbol is used by G2P
-    # If the gene_symbol is already present in the locus table only update the ensembl stable_id
-    update_genes(working_dir, g2p_gene_ids, g2p_genes_by_symbol, unique_stable_id_2_gene_symbol, db_host, db_port, db_name, user, password)
+    # for x in unique_stable_id_2_gene_symbol:
+    #     print(f"{x}: {unique_stable_id_2_gene_symbol[x]}")
 
-    # Update the HGNC IDs
-    # This update uses the gene symbol to compare the genes
-    # We need a new dump of the genes (after all the previous updates)
-    update_xrefs(working_dir, hgnc_file, db_host, db_port, db_name, user, password)
+    # # Update gene_symbol or if gene not in G2P insert new gene
+    # # don't update gene_symbol where readable gene_symbol has been replaced by e.g. AC080038.1 TODO: and gene_symbol is used by G2P
+    # # If the gene_symbol is already present in the locus table only update the ensembl stable_id
+    # update_genes(working_dir, g2p_gene_ids, g2p_genes_by_symbol, unique_stable_id_2_gene_symbol, db_host, db_port, db_name, user, password)
 
-    # TODO
     # # Check if there are G2P genes that should be removed because they are not valid in the gtf file
-    # g2p_genes_not_used = get_g2p_genes_not_used()
-    # for stable_id in g2p_gene_ids:
-    #     if stable_id not in unique_stable_id_2_gene_symbol:
-    #         gene_symbol = g2p_gene_ids[stable_id]["gene_symbol"]
-    #         print(f"---{stable_id} ({gene_symbol}) not found in gtf")
-    #         if stable_id in g2p_genes_not_used:
-    #             print(f"-> can deleted {stable_id} ({gene_symbol}) from g2p")
+    # delete_outdated_locus(db_host, db_port, db_name, user, password, g2p_gene_ids, unique_stable_id_2_gene_symbol)
 
-    # Check again each table with locus id if all data in that column exists in the locus table
-    locus_id_foreign_key_check(db_host, db_port, db_name, user, password, g2p_tables_with_locus_id_link)
+    # # Update the HGNC IDs
+    # # This update uses the gene symbol to compare the genes
+    # # We need a new dump of the genes (after all the previous updates)
+    # update_xrefs(working_dir, hgnc_file, db_host, db_port, db_name, user, password)
 
-    # TODO: update meta
+    # # Check again each table with locus id if all data in that column exists in the locus table
+    # locus_id_foreign_key_check(db_host, db_port, db_name, user, password, g2p_tables_with_locus_id_link)
+
+    # # Update meta
+    # update_meta(db_host, db_port, db_name, user, password, version)
+
 
 if __name__ == '__main__':
     main()
