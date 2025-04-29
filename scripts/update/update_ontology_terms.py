@@ -232,6 +232,10 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
 
 
 def main():
+    """
+    Script to update the Mondo/OMIM ontology terms.
+    """
+
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--config", required=True, help="Config file")
     parser.add_argument("--api_username", required=True, help="Username to connect to the G2P API")
@@ -269,7 +273,7 @@ def main():
         delete_ontologies(records_to_delete, api_username, api_password, api_url)
         print("Deleting ontologies... done\n")
     else:
-        print("Updates to run:")
+        print("\nUpdates to run:")
         for record in records_to_update:
             print(f"{record}: {records_to_update[record]['term']}")
         print("\nOntologies to delete:", records_to_delete)
