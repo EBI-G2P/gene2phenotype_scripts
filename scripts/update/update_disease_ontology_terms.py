@@ -166,7 +166,7 @@ def update_ontologies(records_to_update: dict[str, dict], api_username: str, api
         api_url (str): G2P API URL
     """
 
-    ontology_url = "update/ontology_terms/"
+    ontology_url = "update/disease_ontology_terms/"
     login_url = "login/"
 
     data = {
@@ -174,22 +174,25 @@ def update_ontologies(records_to_update: dict[str, dict], api_username: str, api
         "password": api_password
     }
 
-    response = requests.post(api_url + login_url, json=data)
-    if response.status_code == 200:
-        try:
-            response_update = requests.post(api_url + ontology_url, json=records_to_update, cookies=response.cookies)
-            if response_update.status_code == 200:
-                response_json = response_update.json()
-                print("Ontologies updated successfully:", response_json)
-                if "errors" in response_json:
-                    for error in response_json["errors"]:
-                        print(f"ERROR: {error}")
-            else:
-                print("Failed to update ontologies:", response_update.status_code, response_update.json())
-        except Exception as e:
-            print("Error:", e)
+    if records_to_update:
+        response = requests.post(api_url + login_url, json=data)
+        if response.status_code == 200:
+            try:
+                response_update = requests.post(api_url + ontology_url, json=records_to_update, cookies=response.cookies)
+                if response_update.status_code == 200:
+                    response_json = response_update.json()
+                    print("Ontologies updated successfully:", response_json)
+                    if "errors" in response_json:
+                        for error in response_json["errors"]:
+                            print(f"ERROR: {error}")
+                else:
+                    print("Failed to update ontologies:", response_update.status_code, response_update.json())
+            except Exception as e:
+                print("Error:", e)
+        else:
+            print("Error: cannot login into G2P")
     else:
-        print("Error: cannot login into G2P")
+        print("INFO: no ontology terms to update")
 
 
 def delete_ontologies(records_to_delete: list[str], api_username: str, api_password: str, api_url: str) -> None:
@@ -203,7 +206,7 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
         api_url (str): G2P API URL
     """
 
-    ontology_url = "update/ontology_terms/"
+    ontology_url = "update/disease_ontology_terms/"
     login_url = "login/"
 
     data = {
@@ -211,24 +214,27 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
         "password": api_password
     }
 
-    # Login
-    response = requests.post(api_url + login_url, json=data)
-    if response.status_code == 200:
-        try:
-            # Delete ontology terms
-            response_delete = requests.delete(api_url + ontology_url, json=records_to_delete, cookies=response.cookies)
-            if response_delete.status_code == 200:
-                response_json = response_delete.json()
-                print("Ontologies delete successfully:", response_json)
-                if "errors" in response_json:
-                    for error in response_json["errors"]:
-                        print(f"ERROR: {error}")
-            else:
-                print("Failed to delete ontologies:", response_delete.status_code, response_delete.json())
-        except Exception as e:
-            print("Error:", e)
+    if records_to_delete:
+        # Login
+        response = requests.post(api_url + login_url, json=data)
+        if response.status_code == 200:
+            try:
+                # Delete ontology terms
+                response_delete = requests.delete(api_url + ontology_url, json=records_to_delete, cookies=response.cookies)
+                if response_delete.status_code == 200:
+                    response_json = response_delete.json()
+                    print("Ontologies delete successfully:", response_json)
+                    if "errors" in response_json:
+                        for error in response_json["errors"]:
+                            print(f"ERROR: {error}")
+                else:
+                    print("Failed to delete ontologies:", response_delete.status_code, response_delete.json())
+            except Exception as e:
+                print("Error:", e)
+        else:
+            print("Error: cannot login into G2P")
     else:
-        print("Error: cannot login into G2P")
+        print("INFO: no ontology terms to delete")
 
 
 def main():
@@ -259,9 +265,9 @@ def main():
     password = config['database']['password']
     api_url = config['api']['api_url']
 
-    print("Dump ontology data from G2P...")
+    print("Dump disease ontology data from G2P...")
     ontology_records = dump_ontology_data(db_host, int(db_port), db_name, user, password)
-    print("Dump ontology data from G2P... done\n")
+    print("Dump disease ontology data from G2P... done\n")
 
     records_to_update, records_to_delete = analyse_terms(ontology_records)
 
