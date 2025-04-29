@@ -84,7 +84,7 @@ def read_file(file, gene_records, diseases, dryrun):
             if not line.startswith("gene symbol"):
                 data = line.split("\t")
                 gene_symbol = data[0]
-                current_disease = data[1] # before searching for the disease we have to check if 'gene-related' is used
+                current_disease = data[1].replace("\"", "") # before searching for the disease we have to check if 'gene-related' is used
                 new_disease = data[2]
                 is_updated = data[3]
 
