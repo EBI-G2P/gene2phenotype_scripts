@@ -5,18 +5,16 @@ Usage: python uniprot_importer.py [OPTION]
 
 Options:
 
-    --g2p_host    G2P database host (Required)
-    --g2p_port    G2P database host port (Required)
-    --g2p_database    G2P database name (Required)
-    --g2p_user    G2P database Username (Required)
-    --g2p_password    G2P database Password (default: '') (Optional)
+    --config    Config file with details to the G2P database
 """
+
 import requests
 from requests.adapters import HTTPAdapter, Retry
 import re
 import MySQLdb
 import datetime
 import argparse
+import configparser
 
 # Uniprot data fetch URL
 url = 'https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,xref_mim,xref_hgnc,gene_primary&size=500'
@@ -36,6 +34,7 @@ def get_next_link(headers):
         if match:
             return match.group(1)
 
+
 def get_batch(batch_url):
     global uniprot_release
     while batch_url:
@@ -45,6 +44,7 @@ def get_batch(batch_url):
             uniprot_release = response.headers["X-UniProt-Release"]
         yield response
         batch_url = get_next_link(response.headers)
+
 
 def get_database_value(database, dataItem, gene_symbol):
     if "uniProtKBCrossReferences" in dataItem and len(dataItem["uniProtKBCrossReferences"]):
@@ -64,8 +64,10 @@ def get_database_value(database, dataItem, gene_symbol):
 
     return None
 
+
 def is_protein_function_available(dataItem):
     return "comments" in dataItem and len(dataItem["comments"])!=0 and "texts" in dataItem["comments"][0] and len(dataItem["comments"][0]["texts"])!=0 and "value" in dataItem["comments"][0]["texts"][0]
+
 
 # Function to fetch Uniprot data
 def fetch_all_data():
@@ -88,21 +90,40 @@ def fetch_all_data():
     print(f"Uniprot data successfully fetched via Uniprot API ({len(total_items)} entries)")
     return total_items
 
+
 # Function to insert Uniprot data to database
 def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_items):
-    sql_source = f""" SELECT id, name FROM source WHERE name = 'UniProt' or name = 'HGNC'
+    sql_truncate =  """ TRUNCATE TABLE uniprot_annotation
+                    """
+
+    sql_count = """ SELECT COUNT(*) from uniprot_annotation
+                """
+
+    sql_source = """ SELECT id, name FROM source WHERE name = 'UniProt' or name = 'HGNC'
                  """
-    sql_identifier = f""" SELECT identifier, locus_id FROM locus_identifier WHERE source_id = %s
-                 """
-    insert_sql = f""" INSERT INTO uniprot_annotation(uniprot_accession, gene_id, hgnc, gene_symbol, mim, protein_function, source_id)
+
+    sql_identifier = """ SELECT identifier, locus_id FROM locus_identifier WHERE source_id = %s
+                     """
+
+    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, hgnc, gene_symbol, mim, protein_function, source_id)
                   VALUES(%s, %s, %s, %s, %s, %s, %s)
-              """
-    sql_meta = """ INSERT INTO meta(`key`, date_update, is_public, description, source_id, version)
-               VALUES(%s,%s,%s,%s,%s,%s)
-           """
+                 """
+
+    sql_meta =  """ INSERT INTO meta(`key`, date_update, is_public, description, source_id, version)
+                    VALUES(%s,%s,%s,%s,%s,%s)
+                """
 
     db = MySQLdb.connect(host=db_host, port=db_port, user=db_user, passwd=db_password, db=db_name)
     cursor = db.cursor()
+
+    # Save number of rows from uniprot_annotation
+    cursor.execute(sql_count)
+    previous_number_rows = cursor.fetchone()
+
+    # Truncate uniprot_annotation table before the import is run
+    cursor.execute(sql_truncate)
+    db.commit()
+
     # Fetch source ids
     source_ids = {}
     cursor.execute(sql_source)
@@ -139,29 +160,31 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
     db.commit()
     db.close()
     print("Uniprot data successfully inserted into G2P database.")
-    print(f'Total Uniprot entries fetched: {len(total_items)}')
-    print(f'Total Uniprot entries inserted: {insert_count}')
+    print(f"Previous total number of uniprot entries: {previous_number_rows[0]}")
+    print(f"Total Uniprot entries fetched: {len(total_items)}")
+    print(f"Total Uniprot entries inserted: {insert_count}")
     print("Note: Only Uniprot data entries with existing Gene information in the database will be inserted.")
 
+
 def main():
-    # Fetch Database configuration from User
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--g2p_host", required=True, help="G2P database host")
-    parser.add_argument("--g2p_port", required=True, help="G2P database host port")
-    parser.add_argument("--g2p_database", required=True, help="G2P database name")
-    parser.add_argument("--g2p_user", required=True, help="G2P database Username")
-    parser.add_argument("--g2p_password", default='', help="G2P database Password (default: '')")
+    parser.add_argument("--config", required=True, help="Config file with details to the G2P database")
 
     args = parser.parse_args()
+    config_file = args.config
 
-    g2p_db_host = args.g2p_host
-    g2p_db_port = int(args.g2p_port)
-    g2p_db_name = args.g2p_database
-    g2p_user = args.g2p_user
-    g2p_password = args.g2p_password
+    # Load the config file
+    config = configparser.ConfigParser()
+    config.read(config_file)
+
+    g2p_db_host = config['database']['host']
+    g2p_db_port = config['database']['port']
+    g2p_db_name = config['database']['name']
+    g2p_user = config['database']['user']
+    g2p_password = config['database']['password']
 
     total_items = fetch_all_data()
-    insert_uniprot_data(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, total_items)
+    insert_uniprot_data(g2p_db_host, int(g2p_db_port), g2p_db_name, g2p_user, g2p_password, total_items)
 
 if __name__ == '__main__':
     main()
