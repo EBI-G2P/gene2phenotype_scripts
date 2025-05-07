@@ -7,6 +7,7 @@ import argparse
 import MySQLdb
 import django
 import configparser
+from collections import defaultdict
 from difflib import SequenceMatcher
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -49,7 +50,7 @@ def dump_g2p_diseases(db_host: str, db_port: int, db_name: str, user: str, passw
     Returns:
         dict[str, list]: All disease names with associated synonyms
     """
-    diseases = {}
+    diseases = defaultdict(list)
 
     db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
     cursor = db.cursor()
@@ -65,13 +66,10 @@ def dump_g2p_diseases(db_host: str, db_port: int, db_name: str, user: str, passw
     for row in data:
         disease_name = row[0]
         disease_synonym = row[1]
-
-        if disease_name not in diseases:
-            diseases[disease_name] = [disease_synonym]
-        else:
-            diseases[disease_name].append(disease_synonym)
+        diseases[disease_name].append(disease_synonym)
 
     return diseases
+
 
 def compare_diseases(g2p_disease_synonyms : dict[str, list], cutoff: float, output_file: str) -> None:
     """
