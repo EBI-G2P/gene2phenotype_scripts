@@ -75,7 +75,7 @@ def dump_g2p_diseases(db_host: str, db_port: int, db_name: str, user: str, passw
 
 def compare_diseases(g2p_disease_synonyms : dict[str, list], cutoff: float, output_file: str) -> None:
     """
-    Check how similar is each G2P disease with its associated synonyms.
+    Check how similar each G2P disease is with its associated synonyms.
     Write to a file the diseases with similarity score below the cutoff.
 
     Args:
