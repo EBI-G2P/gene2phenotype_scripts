@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 
-import os.path
-import sys
 import argparse
-import MySQLdb
-import urllib.request
 import configparser
 import gzip
+import os
 import re
+import sys
+import urllib.request
 from datetime import datetime
+
+import MySQLdb
 
 
 def locus_id_foreign_key_check(db_host: str, db_port: int, db_name: str, user: str, password: str, g2p_tables_with_locus_id_link: list)-> None:
@@ -428,17 +429,17 @@ def update_genes(working_dir: str, g2p_gene_ids: dict[str, dict], g2p_genes_by_s
                         wr.write(f"ADD SYNONYM: locus_id = {g2p_gene_ids[stable_id]['locus_id']} add locus_attrib {g2p_gene_symbol}\n")
                     
                     # Compare the coordinates
-                    if (g2p_gene_ids[stable_id]["start"] != unique_stable_id_2_gene_symbol[stable_id]["start"] or
-                        g2p_gene_ids[stable_id]["end"] != unique_stable_id_2_gene_symbol[stable_id]["end"] or
-                        g2p_gene_ids[stable_id]["chr"] != unique_stable_id_2_gene_symbol[stable_id]["chr"]):
+                    if (g2p_gene_ids[stable_id]["locus_start"] != unique_stable_id_2_gene_symbol[stable_id]["start"] or
+                        g2p_gene_ids[stable_id]["locus_end"] != unique_stable_id_2_gene_symbol[stable_id]["end"] or
+                        g2p_gene_ids[stable_id]["locus_chr"] != sequence_chrs[unique_stable_id_2_gene_symbol[stable_id]["chr"]]):
                         cursor.execute(sql_update_coord, [
                             unique_stable_id_2_gene_symbol[stable_id]["start"],
                             unique_stable_id_2_gene_symbol[stable_id]["end"],
                             sequence_chrs[unique_stable_id_2_gene_symbol[stable_id]["chr"]],
-                            g2p_gene_ids[stable_id]['locus_id']
+                            g2p_gene_ids[stable_id]["locus_id"]
                         ])
                         db.commit()
-                        wr.write(f"UPDATE COORD: locus_id = {g2p_gene_ids[stable_id]['locus_id']} (previous {g2p_gene_ids[stable_id]['chr']}:{g2p_gene_ids[stable_id]['start']}-{g2p_gene_ids[stable_id]['end']})\n")
+                        wr.write(f"UPDATE COORD: locus_id = {g2p_gene_ids[stable_id]['locus_id']} (previous {g2p_gene_ids[stable_id]['locus_chr']}:{g2p_gene_ids[stable_id]['locus_start']}-{g2p_gene_ids[stable_id]['locus_end']})\n")
 
     db.close()
 
@@ -656,18 +657,14 @@ def add_gene_synonym(symbol: str, locus_id: int, db_host: str, db_port: int, db_
         password (str): password
     """    
 
-    sql_sel_attribs =   """
-                            SELECT id FROM attrib_type WHERE code = 'gene_synonym'
-                        """
+    sql_sel_attribs = "SELECT id FROM attrib_type WHERE code = 'gene_synonym'"
 
-    sql_sel_source =    """
-                            SELECT id FROM source WHERE name = 'Ensembl'
-                        """
+    sql_sel_source = "SELECT id FROM source WHERE name = 'Ensembl'"
 
-    sql_insert_syn =   """
-                            INSERT INTO locus_attrib(value, is_deleted, attrib_type_id, locus_id, source_id)
-                            VALUES(%s, %s, %s, %s, %s)
-                        """
+    sql_insert_syn = """
+                        INSERT INTO locus_attrib(value, is_deleted, attrib_type_id, locus_id, source_id)
+                        VALUES(%s, %s, %s, %s, %s)
+                    """
 
     db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
     cursor = db.cursor()
@@ -697,13 +694,11 @@ def update_meta(db_host: str, db_port: int, db_name: str, user: str, password: s
 
     description = f"Update genes to Ensembl release {version}"
 
-    sql_version =   """
-                        SELECT id FROM source WHERE name = 'Ensembl'
-                    """
+    sql_version = "SELECT id FROM source WHERE name = 'Ensembl'"
 
     sql =   """
                 INSERT INTO meta(`key`, date_update, is_public, description, version, source_id)
-                VALUES(?,?,?,?,?,?)
+                VALUES(%s, %s, %s, %s, %s, %s)
             """
 
     db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
