@@ -41,10 +41,11 @@ from os import listdir
                 --skip_omim: Option to skip OMIM gene-disease data import (default=off)
                 --skip_mondo: Option to skip MONDO gene-disease data import (default=off)
                 --mondo_file: MONDO file. Supported format: owl. Only necessary when importing mondo (--mondo).
-                --full_import: Option to run a full import of the data. By default, the script runs a data update (default=0)
+                --full_import: Option to run a full import of the data. By default, the script runs a data update (default=off)
 """
 
 debug = 0 # to help parse the owl file
+
 
 def get_g2p_meta(db_host, db_port, db_name, user, password):
     """
@@ -78,6 +79,7 @@ def get_g2p_meta(db_host, db_port, db_name, user, password):
             }
 
     return meta_info
+
 
 def get_mim_gene_diseases(db_host, db_port, db_name, user, password):
     """
@@ -117,10 +119,13 @@ def get_mim_gene_diseases(db_host, db_port, db_name, user, password):
     db.close()
     return gene_diseases
 
-def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, version):
-    """
-        Insert OMIM gene disease data into G2P database
-    """
+
+def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, version, update):
+    """Insert OMIM gene disease data into G2P database"""
+
+    sql_delete = """ DELETE FROM gene_disease
+                     WHERE source_id = %s
+                 """
 
     sql_gene = """ SELECT l.id FROM locus l
                    LEFT JOIN locus_identifier i on i.locus_id = l.id
@@ -128,8 +133,7 @@ def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_dis
                    WHERE i.identifier = %s AND s.name = 'Ensembl'
                """
 
-    sql_source = """ SELECT id, name FROM source WHERE name = 'OMIM' OR name = 'Mondo' or name = 'Ensembl'
-                 """
+    sql_source = "SELECT id, name FROM source WHERE name = 'OMIM' OR name = 'Mondo' or name = 'Ensembl'"
 
     sql_insert = """ INSERT INTO gene_disease(gene_id, disease, identifier, source_id)
                       VALUES(%s, %s, %s, %s)
@@ -147,6 +151,10 @@ def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_dis
     data = cursor.fetchall()
     for row in data:
         source_ids[row[1]] = row[0]
+
+    # In update mode we have to delete the existing OMIM data first
+    if update:
+        cursor.execute(sql_delete, [source_ids["OMIM"]])
 
     for stable_id, gd_info in gene_diseases.items():
         cursor.execute(sql_gene, [stable_id])
@@ -169,100 +177,6 @@ def insert_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_dis
     db.commit()
     db.close()
 
-def update_mim_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, omim_version):
-    """
-        Update OMIM gene-disease data stored in gene_diseases
-
-        'gene_diseases' example:
-            GDF15 => [{'stable_id': 'ENSG00000130513', 'mim_id': '620730',
-                    'disease': 'HYPEREMESIS GRAVIDARUM, SUSCEPTIBILITY TO; HG'}]
-    """
-
-    g2p_current_data = {} # saves current OMIM gene-disease associations from G2P to compare with new data
-    g2p_all_transcripts = {}
-
-    # Query to fetch current Mondo gene-disease associations from G2P
-    sql_query = """ SELECT gd.disease, gd.identifier, li.identifier
-                    FROM gene_disease gd
-                    LEFT JOIN locus l on l.id = gd.gene_id
-                    LEFT JOIN locus_identifier li on li.locus_id = l.id
-                    LEFT JOIN source s ON s.id = li.source_id
-                    LEFT JOIN source s_gd ON s_gd.id = gd.source_id
-                    WHERE s.name = 'Ensembl' and s_gd.name = 'OMIM'
-                """
-
-    # Query to fetch all HGNC IDs from G2P
-    sql_fetch_genes = """ SELECT i.identifier, l.id 
-                          FROM locus l
-                          LEFT JOIN attrib a ON a.id = l.type_id
-                          LEFT JOIN locus_identifier i on i.locus_id = l.id
-                          LEFT JOIN source s on s.id = i.source_id
-                          WHERE a.value = 'gene' AND s.name = 'Ensembl'
-                     """
-
-    sql_source = """ SELECT id, name FROM source WHERE name = 'OMIM' OR name = 'Mondo' or name = 'Ensembl'
-                 """
-
-    sql_ins_gene_disease = """ INSERT INTO gene_disease(gene_id, disease, identifier, source_id)
-                               VALUES(%s, %s, %s, %s)
-                           """
-
-    sql_meta = """ INSERT INTO meta(`key`, date_update, is_public, description, source_id, version)
-                   VALUES(%s,%s,%s,%s,%s,%s)
-               """
-
-    db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
-    cursor = db.cursor()
-    # Fetch current OMIM gene-disease associations from G2P
-    cursor.execute(sql_query)
-    data = cursor.fetchall()
-    for row in data:
-        stable_id = row[2]
-        key = f"{row[1]}---{stable_id}" # key = omim + ensembl id
-
-        # The same OMIM ID can be linked to several genes
-        if key not in g2p_current_data:
-            g2p_current_data[key] = {
-                "omim_id": row[1],
-                "disease": row[0],
-                "stable_id": stable_id
-            }
-        else:
-            warnings.warn(f"Duplicated OMIM ID found in G2P '{key}'")
-    # Fetch all HGNC IDs
-    cursor.execute(sql_fetch_genes)
-    data_genes = cursor.fetchall()
-    for row_gene in data_genes:
-        ensembl_id = row_gene[0]
-        if ensembl_id not in g2p_all_transcripts:
-            g2p_all_transcripts[ensembl_id] = row_gene[1]
-
-    # Get source id
-    source_ids = {}
-    cursor.execute(sql_source)
-    data = cursor.fetchall()
-    for row in data:
-        source_ids[row[1]] = row[0]
-
-    for stable_id, list_omim_data in gene_diseases.items():
-        for omim_data in list_omim_data:
-            if stable_id in g2p_all_transcripts:
-                gene_id = g2p_all_transcripts[stable_id]
-                key = f"{omim_data['mim_id']}---{stable_id}"
-                if key not in g2p_current_data:
-                    print(f"Inserting new OMIM ID {omim_data['mim_id']}; {omim_data['disease']}; {stable_id} (gene id: {gene_id})")
-                    cursor.execute(sql_ins_gene_disease, [gene_id, omim_data['disease'], omim_data['mim_id'], source_ids['OMIM']])
-
-    # Insert import info into meta
-    cursor.execute(sql_meta, ['import_gene_disease_omim',
-                              datetime.datetime.now(),
-                              0,
-                              'Import OMIM gene disease associations from Ensembl core db',
-                              source_ids['Ensembl'],
-                              omim_version])
-
-    db.commit()
-    db.close()
 
 def get_mondo_gene_diseases(file):
     """
@@ -366,6 +280,7 @@ def get_mondo_gene_diseases(file):
 
     return results, all_diseases
 
+
 def insert_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, mondo_version):
     """
         Insert Mondo gene disease data into G2P database
@@ -418,6 +333,7 @@ def insert_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
 
     db.commit()
     db.close()
+
 
 def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_diseases, mondo_version):
     """
@@ -534,6 +450,7 @@ def update_mondo_gene_diseases(db_host, db_port, db_name, user, password, gene_d
     db.commit()
     db.close()
 
+
 def populate_mondo_all_diseases(db_host, db_port, db_name, user, password, mondo_all_diseases):
     sql_ins_mondo = """ INSERT INTO disease_external(disease, identifier, source_id)
                         VALUES(%s, %s, %s)
@@ -565,6 +482,7 @@ def populate_mondo_all_diseases(db_host, db_port, db_name, user, password, mondo
     db.commit()
     db.close()
 
+
 def fetch_mondo_version(file):
     """
         Fetch the Mondo data version from the input file
@@ -582,6 +500,7 @@ def fetch_mondo_version(file):
                             return version.group()
 
     return version
+
 
 def split_mondo_file(file):
     Path("tmp").mkdir(parents=True, exist_ok=True)
@@ -603,6 +522,7 @@ def split_mondo_file(file):
                     if "</rdf:RDF>" not in chunk:
                         wr.write("\n</rdf:RDF>")
                     count = count + 1
+
 
 def main():
     parser = argparse.ArgumentParser(description="")
@@ -651,10 +571,6 @@ def main():
         if "Ensembl" in g2p_meta_info:
             print(f"INFO: current OMIM data is from Ensembl {g2p_meta_info['Ensembl']['data_version']}")
 
-            if run_import == 1:
-                print("Cannot run import: G2P already has OMIM gene-disease associations. Please run the script in update mode (--update 1)")
-                run_import = 0 # set flag to 0 to make sure we don't insert the data again
-
             if g2p_meta_info["Ensembl"]["data_version"] >= version.group() and update_mode == 1:
                 print("Skipping update: OMIM gene-disease data is up-to-date.")
                 update_mode = 0 # set flag to 0 because data in G2P is already updated
@@ -666,20 +582,10 @@ def main():
             gene_diseases = get_mim_gene_diseases(db_host, int(db_port), db_name, user, password)
             print("Getting OMIM gene-disease associations... done")
 
-        # Run the import
-        if run_import == 1:
-            print("> Running OMIM full import")
             # Insert OMIM gene-disease data into G2P db
             print("Inserting OMIM gene-disease associations into G2P...")
-            insert_mim_gene_diseases(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, gene_diseases, version.group())
+            insert_mim_gene_diseases(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, gene_diseases, version.group(), update_mode)
             print("Inserting OMIM gene-disease associations into G2P... done")
-
-        # Run the update
-        elif update_mode == 1:
-            print("> Running OMIM update")
-            # Update OMIM gene-disease data in G2P db
-            update_mim_gene_diseases(g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password, gene_diseases, version.group())
-            print("> Running OMIM update... done")
 
     ### Import or update Mondo ###
     if args.mondo:
