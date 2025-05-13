@@ -120,7 +120,15 @@ def dump_g2p_records(db_host: str, db_port: int, db_name: str, user: str, passwo
     return records
 
 
-def add_elem(parent, name, value):
+def add_elem(parent: object, name: str, value: str) -> None:
+    """
+    Add a field to the XML obj.
+
+    Args:
+        parent (object): ET element obj
+        name (str): name of the element field
+        value (str): value of the field
+    """
     if value:
         child = ET.SubElement(parent, name)
         child.text = value
@@ -152,7 +160,7 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
     entries_elem = ET.SubElement(database_elem, "entries")
     for entry in g2p_records:
         entry_elem = ET.SubElement(entries_elem, "entry", id=entry, acc=entry)
-        entry_name = f"{entry}: {g2p_records[entry]['disease']} ({g2p_records[entry]['confidence']})"
+        entry_name = f"{g2p_records[entry]['disease']} ({g2p_records[entry]['confidence']})"
         add_elem(entry_elem, "name", entry_name)
         # Additional fields
         add_fields_elem = ET.SubElement(entry_elem, "additional_fields")
