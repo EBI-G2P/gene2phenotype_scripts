@@ -86,6 +86,10 @@ def dump_g2p_records(db_host: str, db_port: int, db_name: str, user: str, passwo
                     GROUP BY g2p.stable_id, d.name, a1.value, a2.value, m.value, l.name
             """
 
+        # TODO: add publications
+        # cross reference: EUROPEPMC
+        # https://europepmc.org/article/MED/{pmid}
+
         cursor.execute(sql)
         data = cursor.fetchall()
         for row in data:
@@ -182,7 +186,8 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
             elif xref.startswith("HGNC:"):
                 db = "HGNC"
             else:
-                db = "OMIM_GENE"
+                # Skip the OMIM gene ID because EBI search does not support this ID
+                continue
             ET.SubElement(xrefs_elem, "ref", dbname=db, dbkey=xref)
         # Cross references - disease ontology
         try:
@@ -232,8 +237,7 @@ def main():
     xml_data = create_xml(g2p_version, g2p_records)
 
     # Write to the output file - open in binary mode because 'xml_data' is a bytes obj
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    output_file = f"g2p_records_{current_date}.xml"
+    output_file = f"g2p_records.xml"
 
     with open(output_file, "wb") as wr:
         wr.write(xml_data)
