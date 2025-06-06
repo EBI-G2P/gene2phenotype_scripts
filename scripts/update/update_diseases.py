@@ -25,7 +25,7 @@ import configparser
 
             --file : Tab delimited file with all diseases to be updated (mandatory)
                 File format is the following:
-                    gene symbol\tdisease name\tdisease name formatted\tUpdated
+                    g2p id\tgene symbol\tdisease name\tdisease name formatted\tUpdated
 
             --api_username: Username to connect to the G2P API (mandatory)
             --api_password: Password to connect to the G2P API (mandatory)
