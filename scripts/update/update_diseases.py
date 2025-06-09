@@ -9,6 +9,9 @@ import configparser
 
 """
     Script to update disease names.
+    If the new disease name already exists in the db, then it updates
+    the disease id in locus_genotype_disease with the existing disease id.
+    It prints an info message if the disease is linked to more than one gene.
 
     Params:
             --config : Config file name containing the database and API connection info (mandatory)
@@ -32,10 +35,10 @@ import configparser
             --dryrun: Test script without running the updates (default: 0)
 """
 
-# List of disease ids to be replaced by existing disease ids
-# The update is done in the locus_genotype_disease (replace disease ids)
+# List of disease ids to be replaced by an existing disease id
+# The update is done in the locus_genotype_disease (replace disease id)
 lgd_disease_to_update = []
-# Save a list of unique diseases from the input file - helps keeping track of updates
+# Save a list of unique diseases from the input file - to help keeping track of the updates
 unique_diseases_from_input = set()
 
 
@@ -129,9 +132,9 @@ def read_file(
     Reads the diseases from the input file, for each disease checks if it can be udpdated.
 
     Args:
-        file (str): input file
-        gene_records (dict[str, list]): dict of genes and associated diseases
-        diseases (dict[str, dict]): dict of diseases by name and associated records
+        file (str): tab delimited input file
+        gene_records (dict[str, list]): dictionary of genes and associated list of diseases
+        diseases (dict[str, dict]): dictionary of diseases by name and associated records
         dryrun (int): run script in update mode (default: 0)
 
     Returns:
@@ -154,7 +157,7 @@ def read_file(
         # g2p id, gene symbol, disease name, disease name formatted, Updated
         # Other columns are ignored
         for line in fh:
-            if not line.startswith("gene symbol"):
+            if not line.startswith("g2p id"):
                 data = line.strip().split("\t")
                 g2p_id = data[0]
                 gene_symbol = data[1]
@@ -247,9 +250,8 @@ def read_file(
                         else:
                             list_disease.append(record["disease_name"])
 
-                    # For now we only update diseases linked to one gene
+                    # Flag if the disease is linked to more than one gene
                     if n_records > 1:
-                        to_update = 0
                         print(f"INFO: disease linked to {n_records} records")
 
                     # Print to file genes that won't have disease updates
@@ -268,8 +270,8 @@ def update_diseases(
     Method to update the disease names.
     This method calls the following gene2phenotype API endpoints:
     update/diseases/ to update the disease name (simple update)
-    lgd_disease_updates/ to update the LGD records with the new disease id - it replaces the
-    previous disease id with the new
+    lgd_disease_updates/ to update the LGD record with the new disease id - it replaces the
+    previous disease id with the new id
 
     Args:
         diseases_to_update (list): list of diseases to update
