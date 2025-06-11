@@ -2,54 +2,51 @@
 
 import sys
 import argparse
-import MySQLdb
 import configparser
-from datetime import datetime
+import csv
+import MySQLdb
+import os.path
+import requests
 from lxml import etree as ET
 
 
-def get_g2p_version(db_host: str, db_port: int, db_name: str, user: str, password: str) -> str:
+def get_g2p_version(api_url: str) -> str:
     """
-    Fetch the latest G2P version from the database.
+    Fetch the latest G2P version from the API.
 
     Args:
-        db_host (str): G2P database host name
-        db_port (int): G2P database port number
-        db_name (str): G2P database name
-        user (str): user with read access
-        password (str): password
+        api_url (str): G2P API URL
 
     Returns:
         str: G2P version
-    """    
-    try:
-        db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
-        cursor = db.cursor()
-
-        sql = """   SELECT m.version
-                    FROM meta m
-                    LEFT JOIN source s ON s.id = m.source_id
-                    WHERE s.name = 'G2P'
-                    ORDER BY m.date_update DESC LIMIT 1
-            """
-
-        cursor.execute(sql)
-        g2p_version = cursor.fetchone()
-        cursor.close()
-        db.close()
-
-    except MySQLdb.Error as error:
-        print("Database connection failed:", error)
-        sys.exit(1)
-
-    return g2p_version[0]
-
-
-def dump_g2p_records(db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, dict]:
     """
-    Queries the G2P database to dump all records associated with public panels.
+    g2p_version = None
+    url = api_url+"/reference_data/"
+
+    try:
+        response = requests.get(url)
+    except Exception as e:
+        print(f"Error while fetching the G2P version:", e)
+    else:
+        if response.status_code == 200:
+            result = response.json()
+            for obj in result:
+                if obj["key"] == "g2p_release":
+                    g2p_version = obj["version"]
+        else:
+            print(f"Failed to fetch G2P version")
+
+    return g2p_version
+
+
+def dump_g2p_records(api_url: str, db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, dict]:
+    """
+    Queries the G2P API to download all records associated with public panels.
+    It also queries the database to fetch the gene Ensembl IDs as this ID is not
+    available in the download file fetched from the API.
 
     Args:
+        api_url (str): G2P API URL
         db_host (str): G2P database host name
         db_port (int): G2P database port number
         db_name (str): G2P database name
@@ -59,67 +56,71 @@ def dump_g2p_records(db_host: str, db_port: int, db_name: str, user: str, passwo
     Returns:
         dict[str, dict]: All records associated with public panels
     """
+    url = api_url+"/panel/all/download/"
+    g2p_file = "g2p_data.txt"
     records = {}
+    genes = {}
 
+    # Query the database to fetch the Ensembl gene IDs
     try:
         db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
-        cursor = db.cursor()
+    except MySQLdb.Error as error:
+        print("Database connection failed:", error)
+        sys.exit(1)
+    else:
+        sql = """ SELECT l.name, li.identifier
+                  FROM locus l
+                  LEFT JOIN locus_identifier li ON li.locus_id = l.id
+                  LEFT JOIN source s ON s.id = li.source_id
+                  WHERE s.name = "Ensembl"
+              """
 
-        # Select distinct records
-        sql = """   SELECT g2p.stable_id, d.name, a1.value, a2.value, m.value, l.name,
-                    GROUP_CONCAT(DISTINCT p.name SEPARATOR ',') AS panel_names,
-                    GROUP_CONCAT(DISTINCT li.identifier SEPARATOR ',') AS identifiers,
-                    GROUP_CONCAT(DISTINCT o.accession SEPARATOR ',') AS ontology_terms
-                    FROM locus_genotype_disease lgd
-                    LEFT JOIN g2p_stableid g2p ON g2p.id = lgd.stable_id
-                    LEFT JOIN lgd_panel panel ON panel.lgd_id = lgd.id
-                    LEFT JOIN panel p ON p.id = panel.panel_id
-                    LEFT JOIN disease d ON d.id = lgd.disease_id
-                    LEFT JOIN disease_ontology_term do ON do.disease_id = d.id
-                    LEFT JOIN ontology_term o ON o.id = do.ontology_term_id
-                    LEFT JOIN attrib a1 ON a1.id = lgd.confidence_id
-                    LEFT JOIN attrib a2 ON a2.id = lgd.genotype_id
-                    LEFT JOIN cv_molecular_mechanism m ON m.id = lgd.mechanism_id
-                    LEFT JOIN locus l ON l.id = lgd.locus_id
-                    LEFT JOIN locus_identifier li ON li.locus_id = l.id
-                    WHERE p.is_visible = 1
-                    GROUP BY g2p.stable_id, d.name, a1.value, a2.value, m.value, l.name
-            """
+        cursor = db.cursor()
+        cursor.execute(sql)
+        data = cursor.fetchall()
+        for row in data:
+            genes[row[0]] = row[1]
+        cursor.close()
+        db.close()
+
+    # Query the API to download file
+    try:
+        response = requests.get(url, stream=True)
+    except Exception as e:
+        sys.exit(f"Error while downloading G2P data:", e)
+    else:
+        if response.status_code == 200:
+            with open(g2p_file, 'wb') as wr:
+                for chunk in response.iter_content(chunk_size=128):
+                    wr.write(chunk)
+        else:
+            sys.exit(f"Failed to download G2P data")
+
+    # Read the file
+    with open(g2p_file, "r") as fh:
+        reader = csv.DictReader(fh)
+        for line in reader:
+            g2p_id = line["g2p id"]
+
+            if g2p_id not in records:
+                records[g2p_id] = {
+                    "disease": line["disease name"],
+                    "confidence": line["confidence"],
+                    "genotype": line["allelic requirement"],
+                    "mechanism": line["molecular mechanism"],
+                    "gene": line["gene symbol"],
+                    "panels": line["panel"],
+                    "gene_ensembl": genes[line["gene symbol"]],
+                    "hgnc_id": line["hgnc id"],
+                    "disease_mondo": line["disease MONDO"],
+                    "disease_mim": line["disease mim"]
+                }
+            else:
+                print(f"WARNING: duplicated record '{g2p_id}'")
 
         # TODO: add publications
         # cross reference: EUROPEPMC
         # https://europepmc.org/article/MED/{pmid}
-
-        cursor.execute(sql)
-        data = cursor.fetchall()
-        for row in data:
-            g2p_id = row[0]
-            panels = row[6].split(",")
-            gene_ids = row[7].split(",")
-
-            if g2p_id not in records:
-                records[g2p_id] = {
-                    "disease": row[1],
-                    "confidence": row[2],
-                    "genotype": row[3],
-                    "mechanism": row[4],
-                    "gene": row[5],
-                    "panels": panels,
-                    "gene_ids": gene_ids
-                }
-                # Check if there are ontology terms
-                if row[8]:
-                    records[g2p_id]["ontology_terms"] = row[8].split(",")
-
-            else:
-                print(f"WARNING: duplicated record '{g2p_id}'")
-
-        cursor.close()
-        db.close()
-
-    except MySQLdb.Error as error:
-        print("Database connection failed:", error)
-        sys.exit(1)
 
     return records
 
@@ -178,31 +179,18 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         f.text = g2p_records[entry]["mechanism"]
         f = ET.SubElement(add_fields_elem, "field", name="confidence")
         f.text = g2p_records[entry]["confidence"]
+
         # Cross references - gene ID
         xrefs_elem = ET.SubElement(entry_elem, "cross_references")
-        for xref in g2p_records[entry]["gene_ids"]:
-            if xref.startswith("ENSG"):
-                db = "ENSEMBL_GENE"
-            elif xref.startswith("HGNC:"):
-                db = "HGNC"
-            else:
-                # Skip the OMIM gene ID because EBI search does not support this ID
-                continue
-            ET.SubElement(xrefs_elem, "ref", dbname=db, dbkey=xref)
+        # Gene IDs: Ensembl and HGNC
+        ET.SubElement(xrefs_elem, "ref", dbname="HGNC", dbkey=g2p_records[entry]["hgnc_id"])
+        ET.SubElement(xrefs_elem, "ref", dbname="ENSEMBL_GENE", dbkey=g2p_records[entry]["gene_ensembl"])
+
         # Cross references - disease ontology
-        try:
-            ontology_list = g2p_records[entry]["ontology_terms"]
-        except:
-            continue
-        else:
-            for ontology_xref in ontology_list:
-                if ontology_xref.startswith("MONDO"):
-                    db = "Mondo"
-                elif ontology_xref.startswith("Orphanet"):
-                    db = "Orphanet"
-                else:
-                    db = "OMIM_DISEASE"
-                ET.SubElement(xrefs_elem, "ref", dbname=db, dbkey=ontology_xref)
+        if g2p_records[entry]["disease_mondo"] != "":
+            ET.SubElement(xrefs_elem, "ref", dbname="Mondo", dbkey=g2p_records[entry]["disease_mondo"])
+        if g2p_records[entry]["disease_mim"] != "":
+            ET.SubElement(xrefs_elem, "ref", dbname="OMIM_DISEASE", dbkey=g2p_records[entry]["disease_mim"])
 
     return ET.tostring(database_elem, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
@@ -210,9 +198,11 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
 def main():
     parser = argparse.ArgumentParser(description="Generate a G2P XML file for the EBI search engine")
     parser.add_argument("--config", required=True, help="Config file containing details to the G2P database")
+    parser.add_argument("--output_dir", required=True, help="Path to the output directory")
     args = parser.parse_args()
 
     config_file = args.config
+    output_dir = args.output_dir
 
     # Load the config file
     config = configparser.ConfigParser()
@@ -229,15 +219,17 @@ def main():
         user = g2p_config['user']
         password = g2p_config['password']
 
+    api_url = "https://www.ebi.ac.uk/gene2phenotype/api"
+
     # Get the G2P version from the meta table
-    g2p_version = get_g2p_version(db_host, int(db_port), db_name, user, password)
+    g2p_version = get_g2p_version(api_url)
     # Fetch all records to be available in the EBI search
-    g2p_records = dump_g2p_records(db_host, int(db_port), db_name, user, password)
-    # Generate the XML with all records
+    g2p_records = dump_g2p_records(api_url, db_host, int(db_port), db_name, user, password)
+    # # Generate the XML with all records
     xml_data = create_xml(g2p_version, g2p_records)
 
     # Write to the output file - open in binary mode because 'xml_data' is a bytes obj
-    output_file = f"g2p_records.xml"
+    output_file = os.path.join(output_dir, "g2p_records.xml")
 
     with open(output_file, "wb") as wr:
         wr.write(xml_data)
