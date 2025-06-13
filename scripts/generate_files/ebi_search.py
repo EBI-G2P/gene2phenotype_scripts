@@ -10,6 +10,26 @@ import requests
 from lxml import etree as ET
 
 
+"""
+    Description: Script to generate XML file for EBI Search
+
+    Params:
+            --config : Config file name containing the database and API connection info (mandatory)
+                    File format is the following: 
+                        [g2p_database]
+                        host = <>
+                        port = <>
+                        user = <>
+                        password = <>
+                        name = <>
+
+                        [api]
+                        api_url = <>
+
+            --output_dir : Path to the output directory where XML file is going to be saved (mandatory)
+    """
+
+
 def get_g2p_version(api_url: str) -> str:
     """
     Fetch the latest G2P version from the API.
@@ -113,14 +133,11 @@ def dump_g2p_records(api_url: str, db_host: str, db_port: int, db_name: str, use
                     "gene_ensembl": genes[line["gene symbol"]],
                     "hgnc_id": line["hgnc id"],
                     "disease_mondo": line["disease MONDO"],
-                    "disease_mim": line["disease mim"]
+                    "disease_mim": line["disease mim"],
+                    "pmids": line["publications"]
                 }
             else:
                 print(f"WARNING: duplicated record '{g2p_id}'")
-
-        # TODO: add publications
-        # cross reference: EUROPEPMC
-        # https://europepmc.org/article/MED/{pmid}
 
     return records
 
@@ -192,6 +209,12 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         if g2p_records[entry]["disease_mim"] != "":
             ET.SubElement(xrefs_elem, "ref", dbname="OMIM_DISEASE", dbkey=g2p_records[entry]["disease_mim"])
 
+        # Cross references - publications
+        if g2p_records[entry]["pmids"] != "":
+            publications_list = g2p_records[entry]["pmids"].split("; ")
+            for pmid in publications_list:
+                ET.SubElement(xrefs_elem, "ref", dbname="EUROPEPMC", dbkey=pmid)
+
     return ET.tostring(database_elem, pretty_print=True, encoding="UTF-8", xml_declaration=True)
 
 
@@ -219,7 +242,12 @@ def main():
         user = g2p_config['user']
         password = g2p_config['password']
 
-    api_url = "https://www.ebi.ac.uk/gene2phenotype/api"
+    try:
+        api = config["api"]
+    except KeyError:
+        sys.exit("ERROR: 'api' missing from config file")
+    else:
+        api_url = api["api_url"]
 
     # Get the G2P version from the meta table
     g2p_version = get_g2p_version(api_url)
