@@ -41,7 +41,7 @@ def get_g2p_version(api_url: str) -> str:
         str: G2P version
     """
     g2p_version = None
-    url = api_url+"/reference_data/"
+    url = api_url + "/reference_data/"
 
     try:
         response = requests.get(url)
@@ -59,7 +59,9 @@ def get_g2p_version(api_url: str) -> str:
     return g2p_version
 
 
-def dump_g2p_records(api_url: str, db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, dict]:
+def dump_g2p_records(
+    api_url: str, db_host: str, db_port: int, db_name: str, user: str, password: str
+) -> dict[str, dict]:
     """
     Queries the G2P API to download all records associated with public panels.
     It also queries the database to fetch the gene Ensembl IDs as this ID is not
@@ -76,14 +78,16 @@ def dump_g2p_records(api_url: str, db_host: str, db_port: int, db_name: str, use
     Returns:
         dict[str, dict]: All records associated with public panels
     """
-    url = api_url+"/panel/all/download/"
+    url = api_url + "/panel/all/download/"
     g2p_file = "g2p_data.txt"
     records = {}
     genes = {}
 
     # Query the database to fetch the Ensembl gene IDs
     try:
-        db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
+        db = MySQLdb.connect(
+            host=db_host, port=db_port, user=user, passwd=password, db=db_name
+        )
     except MySQLdb.Error as error:
         print("Database connection failed:", error)
         sys.exit(1)
@@ -110,7 +114,7 @@ def dump_g2p_records(api_url: str, db_host: str, db_port: int, db_name: str, use
         sys.exit(f"Error while downloading G2P data:", e)
     else:
         if response.status_code == 200:
-            with open(g2p_file, 'wb') as wr:
+            with open(g2p_file, "wb") as wr:
                 for chunk in response.iter_content(chunk_size=128):
                     wr.write(chunk)
         else:
@@ -134,7 +138,7 @@ def dump_g2p_records(api_url: str, db_host: str, db_port: int, db_name: str, use
                     "hgnc_id": line["hgnc id"],
                     "disease_mondo": line["disease MONDO"],
                     "disease_mim": line["disease mim"],
-                    "pmids": line["publications"]
+                    "pmids": line["publications"],
                 }
             else:
                 print(f"WARNING: duplicated record '{g2p_id}'")
@@ -167,12 +171,16 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
 
     Returns:
         bytes: xml data generated with the G2P records info
-    """    
+    """
     database_elem = ET.Element("database")
 
     # Add metadata
     add_elem(database_elem, "name", "G2P")
-    add_elem(database_elem, "description", "Gene2Phenotype (G2P) is a detailed collection of expert curated gene-disease associations with information on allelic requirement, observed variant classes and disease mechanism")
+    add_elem(
+        database_elem,
+        "description",
+        "Gene2Phenotype (G2P) is a detailed collection of expert curated gene-disease associations with information on allelic requirement, observed variant classes and disease mechanism",
+    )
     add_elem(database_elem, "url", "https://www.ebi.ac.uk/gene2phenotype/")
     add_elem(database_elem, "url_search", "https://www.ebi.ac.uk/gene2phenotype/lgd/")
     add_elem(database_elem, "release", g2p_version)
@@ -182,7 +190,9 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
     entries_elem = ET.SubElement(database_elem, "entries")
     for entry in g2p_records:
         entry_elem = ET.SubElement(entries_elem, "entry", id=entry, acc=entry)
-        entry_name = f"{g2p_records[entry]['disease']} ({g2p_records[entry]['confidence']})"
+        entry_name = (
+            f"{g2p_records[entry]['disease']} ({g2p_records[entry]['confidence']})"
+        )
         add_elem(entry_elem, "name", entry_name)
         # Additional fields
         add_fields_elem = ET.SubElement(entry_elem, "additional_fields")
@@ -200,14 +210,31 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         # Cross references - gene ID
         xrefs_elem = ET.SubElement(entry_elem, "cross_references")
         # Gene IDs: Ensembl and HGNC
-        ET.SubElement(xrefs_elem, "ref", dbname="HGNC", dbkey=g2p_records[entry]["hgnc_id"])
-        ET.SubElement(xrefs_elem, "ref", dbname="ENSEMBL_GENE", dbkey=g2p_records[entry]["gene_ensembl"])
+        ET.SubElement(
+            xrefs_elem, "ref", dbname="HGNC", dbkey=g2p_records[entry]["hgnc_id"]
+        )
+        ET.SubElement(
+            xrefs_elem,
+            "ref",
+            dbname="ENSEMBL_GENE",
+            dbkey=g2p_records[entry]["gene_ensembl"],
+        )
 
         # Cross references - disease ontology
         if g2p_records[entry]["disease_mondo"] != "":
-            ET.SubElement(xrefs_elem, "ref", dbname="Mondo", dbkey=g2p_records[entry]["disease_mondo"])
+            ET.SubElement(
+                xrefs_elem,
+                "ref",
+                dbname="Mondo",
+                dbkey=g2p_records[entry]["disease_mondo"],
+            )
         if g2p_records[entry]["disease_mim"] != "":
-            ET.SubElement(xrefs_elem, "ref", dbname="OMIM_DISEASE", dbkey=g2p_records[entry]["disease_mim"])
+            ET.SubElement(
+                xrefs_elem,
+                "ref",
+                dbname="OMIM_DISEASE",
+                dbkey=g2p_records[entry]["disease_mim"],
+            )
 
         # Cross references - publications
         if g2p_records[entry]["pmids"] != "":
@@ -215,13 +242,23 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
             for pmid in publications_list:
                 ET.SubElement(xrefs_elem, "ref", dbname="EUROPEPMC", dbkey=pmid)
 
-    return ET.tostring(database_elem, pretty_print=True, encoding="UTF-8", xml_declaration=True)
+    return ET.tostring(
+        database_elem, pretty_print=True, encoding="UTF-8", xml_declaration=True
+    )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate a G2P XML file for the EBI search engine")
-    parser.add_argument("--config", required=True, help="Config file containing details to the G2P database")
-    parser.add_argument("--output_dir", required=True, help="Path to the output directory")
+    parser = argparse.ArgumentParser(
+        description="Generate a G2P XML file for the EBI search engine"
+    )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Config file containing details to the G2P database",
+    )
+    parser.add_argument(
+        "--output_dir", required=True, help="Path to the output directory"
+    )
     args = parser.parse_args()
 
     config_file = args.config
@@ -232,15 +269,15 @@ def main():
     config.read(config_file)
 
     try:
-        g2p_config = config['g2p_database']
+        g2p_config = config["g2p_database"]
     except KeyError:
         sys.exit("ERROR: 'g2p_database' missing from config file")
     else:
-        db_host = g2p_config['host']
-        db_port = g2p_config['port']
-        db_name = g2p_config['name']
-        user = g2p_config['user']
-        password = g2p_config['password']
+        db_host = g2p_config["host"]
+        db_port = g2p_config["port"]
+        db_name = g2p_config["name"]
+        user = g2p_config["user"]
+        password = g2p_config["password"]
 
     try:
         api = config["api"]
@@ -252,7 +289,9 @@ def main():
     # Get the G2P version from the meta table
     g2p_version = get_g2p_version(api_url)
     # Fetch all records to be available in the EBI search
-    g2p_records = dump_g2p_records(api_url, db_host, int(db_port), db_name, user, password)
+    g2p_records = dump_g2p_records(
+        api_url, db_host, int(db_port), db_name, user, password
+    )
     # # Generate the XML with all records
     xml_data = create_xml(g2p_version, g2p_records)
 
@@ -263,5 +302,5 @@ def main():
         wr.write(xml_data)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
