@@ -4,8 +4,6 @@ import subprocess
 import argparse
 import os
 import sys
-# import mysql.connector
-# from mysql.connector import Error
 from datetime import date, datetime
 import requests
 # import response
@@ -37,69 +35,6 @@ confidence_category = {
 }
 
 
-# def get_ols(disease_name):
-#     # only using mondo because mondo gives a close enough match with how we name diseases in G2P
-#     statement = "No disease mim"
-#     endpoint = 'http://www.ebi.ac.uk/ols/api/search?q='
-#     ontology = '&ontology=mondo'
-#     url = endpoint + disease_name + ontology
-#     result = requests.get(url)
-#     if result.status_code == 200:
-#         final_result = json.loads(result.content)
-#         response = final_result["response"]
-#         documents = response["docs"]
-
-#         mondo_id = [i["obo_id"] for i in documents if "obo_id" in i ]
-#     else:
-#         print("Connecting to the " + endpoint + " failed")
-#         sys.exit()
-#         pass
-        
-#     if len(mondo_id) > 0:
-#         return mondo_id[0]
-#     else:
-#         return statement
-
-# def fetch_g2p_attribs(host, port, db, user, password):
-#     """
-#         Fetchs allelic requirement and mutation consequence attribs from the db.
-#     """
-#     ar_attribs = {}
-#     mc_attribs = {}
-
-#     sql_query_attribs = """ SELECT at.code, a.attrib_id, a.value
-#                             FROM attrib a 
-#                             LEFT JOIN attrib_type at ON at.attrib_type_id = a.attrib_type_id
-#                             WHERE at.code = 'allelic_requirement' or at.code = 'mutation_consequence'
-#                         """
-
-#     connection = mysql.connector.connect(host=host,
-#                                          database=db,
-#                                          user=user,
-#                                          port=port,
-#                                          password=password)
-
-#     try:
-#         if connection.is_connected():
-#             cursor = connection.cursor()
-#             cursor.execute(sql_query_attribs)
-#             attrib_data = cursor.fetchall()
-#             for row in attrib_data:
-#                 if(row[0] == "allelic_requirement"):
-#                     ar_attribs[row[1]] = row[2] # key: attrib id; value: attrib name
-#                 else:
-#                     mc_attribs[row[1]] = row[2] # key: attrib id; value: attrib name
-    
-#     except Error as e:
-#         print("Error while connecting to MySQL", e)
-#     finally:
-#         if cursor:
-#             cursor.close()
-#         if connection and connection.is_connected():
-#             connection.close()
-    
-#     return ar_attribs, mc_attribs
-
 def fetch_g2p_records(data: dict[str, Any]):
     fetch_g2p_records = "panel/all/download/"
 
@@ -111,16 +46,6 @@ def fetch_g2p_records(data: dict[str, Any]):
 
     else: 
         sys.exit("Issues downloading the file")
-
-    # output_filename = "check.csv"
-    # if response.status_code == 200:
-    #     with open(output_filename, "wb") as f:
-    #         f.write(response.content)
-    #     print(f"Downloading G2P files... done. Saved as '{output_filename}'\n")
-    #     return output_filename
-    # else: 
-    #     sys.exit(f"Issues downloading the file: Status Code {response.status_code}")
-
 
 def reading_data(response) -> list:
     csv_content = io.StringIO(response.content.decode("utf-8"))
@@ -145,7 +70,33 @@ def retrieve_unsubmitted_records(data: dict[str, Any], unsubmitted: list) -> lis
 
     return records
 
-def write_to_the_GenCC_file(data: dict[str, Any], outfile):
+def create_gencc_submission_record(data:dict[str, Any], submission_id, date, type_of, stable_id):
+    create_url = "gencc_create/"
+
+    login_url = "login/"
+
+    login_info = {"username": data["username"], "password": data["password"]}
+
+    response = requests.post(data["api_url"]+login_url, json=login_info)
+    create_info = {
+        "submission_id": submission_id,
+        "date_of_submission": date,
+        "type_of_submission": type_of,
+        "g2p_stable_id" : stable_id
+    }
+    if response.status_code == 200:
+        try:
+            response_create = requests.post(
+                data["api_url"]+create_url, json=create_info, cookies=response.cookies
+            )
+            if response_create.status_code in (200, 201):
+                print(f"GenCC submission for the record {stable_id} was created successfully")
+            else:
+                print(f"Issues creating the submissions {response_create.status_code} {response_create.json}")
+        except Exception as e:
+            print('Error:', e)
+
+def write_to_the_GenCC_file(data: dict[str, Any], outfile, dry, db_config):
     with open(outfile, mode='w') as output_file:
          output_file.write("submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tpmids\tassertion_criteria_url\n")
         
@@ -173,6 +124,10 @@ def write_to_the_GenCC_file(data: dict[str, Any], outfile):
 
              line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
              output_file.write(line_to_output)
+             if dry == "False":
+                 type_of = "create"
+                 db_date = dt.strftime("%Y-%m-%d") 
+                 create_gencc_submission_record(db_config, submission_id, db_date, type_of, g2p_id)
     return output_file
 
 
@@ -210,6 +165,8 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
     data["database"] = config["database"]["name"]
     data["password"] = config["database"]["password"]
     data["api_url"] = config["api"]["api_url"]
+    data["username"] = config["api"]["username"]
+    data["password"] = config["api"]["password"]
 
     return data
 
@@ -220,10 +177,16 @@ def main():
     #                 default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
     #                 help="Path where the G2P and GenCC files are going to be saved")
     ap.add_argument("--config_file", required=True, help="G2P Configuration file")
+    ap.add_argument("--dry", required=False, help="If dry is False, it creates an actual GenCC submission so updates the db" )
     args = ap.parse_args()
 
     # ensembl_dir = os.environ.get('ENSEMBL_ROOT_DIR')
     db_config = read_from_config_file(args.config_file)
+   
+
+
+    if args.dry:
+        dry = args.dry
 
     # if not ensembl_dir or not os.path.exists(f"{ensembl_dir}/ensembl-gene2phenotype/scripts/download_file.sh"):
     #     raise FileNotFoundError("ENSEMBL_ROOT_DIR is not set correctly or the script does not exist")
@@ -234,119 +197,8 @@ def main():
     unsubmitted = get_unsubmitted_record(db_config)
     common = retrieve_unsubmitted_records(read_data, unsubmitted)
     output_file = "G2P_GenCC.txt"
-    write_to_the_GenCC_file(common, output_file)
-
-    # outfile = args.path + "/G2P_GenCC.txt"
-    # final_output_file = args.path + "/G2P_GenCC.xlsx"
-
-    # final_data_to_submit = {}
-    # submitter_id = "GENCC:000112" # G2P submitter id
-    # submitter_name = "TGMI G2P" # G2P submitter name
-    # assertion_criteria_url = "https://www.ebi.ac.uk/gene2phenotype/terminology"
-    # g2p_url = "https://www.ebi.ac.uk/gene2phenotype/"
-    # submission_id_base = 1000112 # ID maintained by us. Any alphanumeric string will be accepted up to 64 characters
-
-    # print(f"Fetching all G2P records...")
-    # # Fetch the attribs from G2P db
-    # ar_attribs, mc_attribs = fetch_g2p_attribs(host, port, db, user, password)
-    # # Allelic requeriment and mutation consequence are type SET
-    # # Doing a join is complicated when we have multiple values in the SET
-    # # That is why we pre-fetched the attribs with fetch_g2p_attribs()
-    # all_g2p_records = fetch_g2p_records(host, port, db, user, password, ar_attribs, mc_attribs)
-    # print(f"Fetching all G2P records... done\n")
-
-    # # Output format
-    # # submission_id: automatic id
-    # # hgnc_id: HGNC gene ID
-    # # hgnc_symbol: gene symbol (optional)
-    # # disease_id: omim, mondo or orpha id
-    # # disease_name: our disease name (optional)
-    # # moi_id: allelic requeriment GenCC ID
-    # # moi_name: allelic requeriment (optional)
-    # # submitter_id: G2P GenCC ID
-    # # submitter_name: G2P (optional)
-    # # classification_id: confidence GenCC ID
-    # # classification_name: confidence (optional)
-    # # date: format YYYY/MM/DD
-    # # public_report_url: G2P URL for the record (optional)
-    # # pmids: Listing of PMIDs that have been used in the submission seperated by comma
-    # # assertion_criteria_url: G2P terminology url
-
-    # with open(outfile, mode='w') as output_file:
-    #     # Write output header
-    #     output_file.write("submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tpmids\tassertion_criteria_url\n")
-
-    #     for file in files:
-    #         file_path = args.path + "/" + file
-
-    #         with gzip.open(file_path, mode='rt') as gz_file:
-    #             csv_reader = csv.DictReader(gz_file)
-                
-    #             for row in csv_reader:
-    #                 gene_symbol = row["gene symbol"]
-    #                 disease_name = row["disease name"]
-    #                 ar = row["allelic requirement"] # we are going to skip records with multiple allelic requirement
-    #                 mc_list = row["mutation consequence"].split(";")
-    #                 mc_list.sort()
-    #                 mc = ";".join(mc_list)
-    #                 key = f"{gene_symbol}---{disease_name}---{ar}---{mc}"
-
-    #                 if key not in final_data_to_submit:
-    #                     # HGNC ID
-    #                     h = row["hgnc id"]
-    #                     hgnc_id = f"HGNC:{h}"
-
-    #                     # Prepare MOI - allelic requeriment
-    #                     if ar in allelic_requirement:
-    #                         moi_id = allelic_requirement[ar]
-    #                     else:
-    #                         print(f"SKIP: invalid allelic requeriment '{ar}' not found for key '{key}' in file '{file}'")
-    #                         continue
-
-    #                     # Get the G2P internal ID to use in the URL
-    #                     if key in all_g2p_records:
-    #                         g2p_id = all_g2p_records[key]
-    #                     else:
-    #                         sys.exit(f"Key: '{key}' from download files not found in G2P database")
-
-    #                     record_url = g2p_url + str(g2p_id)
-
-    #                     # the submission id is generated and maintained by us
-    #                     g2p_id_formatted = f"{int(g2p_id):05}"
-    #                     submission_id = f"{submission_id_base}{g2p_id_formatted}"
-
-    #                     # Confidence
-    #                     confidence = row["confidence category"]
-    #                     classification_id = confidence_category[confidence]
-
-    #                     # Update disease name to dyadic
-    #                     if not disease_name.startswith(gene_symbol):
-    #                         new_disease_name = gene_symbol + "-related " + disease_name
-    #                     else:
-    #                         new_disease_name = disease_name
-
-    #                     # We use the OMIM, Mondo or Orphanet as the disease_id
-    #                     disease_id = row["disease mim"]
-    #                     disease_ontology = row["disease ontology"]
-    #                     if disease_id == "No disease mim" and disease_ontology:
-    #                         disease_id = disease_ontology
-                        
-    #                     # pmids = row["pmids"].replace(";", ",")
-    #                     pmids = row["pmids"]
-
-    #                     g2p_date = row["gene disease pair entry date"]
-    #                     if g2p_date:
-    #                         g2p_date_tmp = datetime.strptime(g2p_date, "%Y-%m-%d %H:%M:%S")
-    #                         g2p_date = g2p_date_tmp.strftime("%Y/%m/%d")
-
-    #                     line_to_output = f"{submission_id}\t{hgnc_id}\t{gene_symbol}\t{disease_id}\t{new_disease_name}\t{moi_id}\t{ar}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{confidence}\t{g2p_date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
-    #                     output_file.write(line_to_output)
-
-    #                     final_data_to_submit[key] = 1
-
-    # output_file.close()
-
-    # convert_txt_to_excel(outfile, final_output_file)
+    outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
+    #lonvert_txt_to_excel(outfile, final_output_file)
 
 if __name__ == '__main__':
     main()
