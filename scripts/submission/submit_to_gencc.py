@@ -183,7 +183,7 @@ def write_to_the_GenCC_file(
             hgnc_symbol = record["gene symbol"]
 
             disease_id = record["disease mim"] or record["disease MONDO"]
-            if disease_id is None:
+            if disease_id is None or disease_id == "":
                 issues_with_record.append(g2p_id)
                 continue
             disease_name = record["disease name"]
