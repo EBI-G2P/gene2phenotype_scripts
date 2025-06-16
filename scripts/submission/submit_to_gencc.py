@@ -9,7 +9,7 @@ import requests
 import json
 import gzip
 import csv
-# from openpyxl import Workbook
+from openpyxl import Workbook
 from typing import Any
 from configparser import ConfigParser
 import io
@@ -185,7 +185,7 @@ def write_to_the_GenCC_file(data: dict[str, Any], outfile: str, dry: str, db_con
                  type_of = "create"
                  db_date = create_datetime_now()
                  create_gencc_submission_record(db_config, submission_id, db_date, type_of, g2p_id)
-    return output_file
+    return outfile
 
 def create_datetime_now()-> date:
     """Creates datetime at present and formats it to YYYY-MM-DD
@@ -243,8 +243,9 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-p", "--path",
-                    default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
-                    help="Path where the G2P and GenCC files are going to be saved")
+                    # default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
+                    help="Path where the G2P and GenCC files are going to be saved",
+                    required=False)
     ap.add_argument("--config_file", required=True, help="G2P Configuration file")
     ap.add_argument("--dry", required=False, help="If dry is False, it creates an actual GenCC submission so updates the db" )
     args = ap.parse_args()
@@ -256,8 +257,17 @@ def main():
 
     if args.dry:
         dry = args.dry
+    else:
+        dry = True
 
-    gencc_dir = args.path + create_datetime_now()
+    if args.path:
+        path = args.path
+        gencc_dir = args.path + create_datetime_now()
+        output_file = f"{gencc_dir}/G2P_GenCC.txt"
+        final_output_file =  f"{gencc_dir}/G2P_GenCC.xlsx"
+    else:
+        output_file = "G2P_GenCC.txt"
+        final_output_file = "G2P_GenCC.xlsx"
 
 
     print("\nDownloading G2P files...")
@@ -265,9 +275,8 @@ def main():
     read_data = reading_data(file_data)
     unsubmitted = get_unsubmitted_record(db_config)
     common = retrieve_unsubmitted_records(read_data, unsubmitted)
-    output_file = f"{gencc_dir}/G2P_GenCC.txt"
     outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
-    #lonvert_txt_to_excel(outfile, final_output_file)
+    convert_txt_to_excel(outfile, final_output_file)
 
 if __name__ == '__main__':
     main()
