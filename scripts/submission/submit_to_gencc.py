@@ -6,7 +6,6 @@ import os
 import sys
 from datetime import date, datetime
 import requests
-# import response
 import json
 import gzip
 import csv
@@ -35,7 +34,17 @@ confidence_category = {
 }
 
 
-def fetch_g2p_records(data: dict[str, Any]):
+def fetch_g2p_records(data: dict[str, Any])-> requests.Response:
+    """Fetches the G2P record using all the panels download
+    User is not authenticated to ensure only visible panels is downloaded 
+
+    Args:
+        data (dict[str, Any]): The DB and API configuration dictionary
+
+    Returns:
+        requests.Response: The response object from the get request
+    """    
+    
     fetch_g2p_records = "panel/all/download/"
 
     url = data["api_url"] + fetch_g2p_records
@@ -47,13 +56,30 @@ def fetch_g2p_records(data: dict[str, Any]):
     else: 
         sys.exit("Issues downloading the file")
 
-def reading_data(response) -> list:
+def reading_data(response: requests.Response) -> list:
+    """Reads the data from the response and converts it to a csv.DictReader
+
+    Args:
+        response (requests.Response): The response object from the get request
+
+    Returns:
+        list: The list reader
+    """    
+    
     csv_content = io.StringIO(response.content.decode("utf-8"))
     reader = csv.DictReader(csv_content)
 
     return reader
 
 def get_unsubmitted_record(data: dict[str, Any])-> list:
+    """Gets the unsubmitted records from the API
+
+    Args:
+        data (dict[str, Any]): DB and API configuration dictionary
+
+    Returns:
+        list: Returns a list of unsubmitted ids
+    """    
     fetch_unsubmitted_record = "unsubmitted-stable-ids/"
 
     url = data["api_url"] + fetch_unsubmitted_record
@@ -66,11 +92,30 @@ def get_unsubmitted_record(data: dict[str, Any])-> list:
         print("Could not fetch unsubmitted records")
 
 def retrieve_unsubmitted_records(data: dict[str, Any], unsubmitted: list) -> list:
+    """Retrieves unsubmitted records from the read data from the file
+
+    Args:
+        data (dict[str, Any]): Content of the CSV file
+        unsubmitted (list): List of unsubmitted ids 
+
+    Returns:
+        list: List of the records that have not been submitted
+    """    
     records = [row for row in data if row["g2p id"] in unsubmitted]
 
     return records
 
-def create_gencc_submission_record(data:dict[str, Any], submission_id, date, type_of, stable_id):
+def create_gencc_submission_record(data:dict[str, Any], submission_id: str, date: str, type_of: str, stable_id: str):
+    """Creates the GenCC submission record by creating the record in the gencc_submission table of the DB
+
+    Args:
+        data (dict[str, Any]): DB configuration data
+        submission_id (str): Submission id
+        date (str): date
+        type_of (str): Usually create 
+        stable_id (str): G2P stable id 
+    """    
+ 
     create_url = "gencc_create/"
 
     login_url = "login/"
@@ -96,7 +141,19 @@ def create_gencc_submission_record(data:dict[str, Any], submission_id, date, typ
         except Exception as e:
             print('Error:', e)
 
-def write_to_the_GenCC_file(data: dict[str, Any], outfile, dry, db_config):
+def write_to_the_GenCC_file(data: dict[str, Any], outfile: str, dry: str, db_config: dict[str, Any]) -> str:
+    """Creates the G2P_GenCC.txt and also calls the create the gencc_submission function when dry is False,
+    A real run
+
+    Args:
+        data (dict[str, Any]): Record of unsubmitted ids
+        outfile (str): Txt file to be created
+        dry (str): To allow for a real run, which updates the db
+        db_config (dict[str, Any]): DB/API configuration dictionary
+
+    Returns:
+        str: An output file
+    """    
     with open(outfile, mode='w') as output_file:
          output_file.write("submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tpmids\tassertion_criteria_url\n")
         
@@ -130,15 +187,24 @@ def write_to_the_GenCC_file(data: dict[str, Any], outfile, dry, db_config):
                  create_gencc_submission_record(db_config, submission_id, db_date, type_of, g2p_id)
     return output_file
 
-def create_datetime_now():
+def create_datetime_now()-> date:
+    """Creates datetime at present and formats it to YYYY-MM-DD
+
+    Returns:
+        date: Formatted date
+    """    
+
     time_now = datetime.now()
     db_date = time_now.strftime("%Y-%m-%d")
     return db_date
 
-def convert_txt_to_excel(input_file, output_file):
-    """
-        Converts a text file to an Excel file.
-    """
+def convert_txt_to_excel(input_file: str, output_file: str):
+    """Converts txt to Excel file 
+
+    Args:
+        input_file (str): Text file to be converted
+        output_file (str): Excel file that will be created 
+    """    
     wb = Workbook()
     ws = wb.active
 
@@ -151,13 +217,13 @@ def convert_txt_to_excel(input_file, output_file):
     wb.save(output_file)
 
 def read_from_config_file(config_file: str) -> dict[str, Any]:
-    """_summary_
+    """Reads from Configuration file (config.ini) and creates a dictionary of data 
 
     Args:
-        config_file (str): _description_
+        config_file (str): configuration file
 
     Returns:
-        dict[str, Any]: _description_
+        dict[str, Any]: DB/API configuration dict
     """    
     data = {}
     config = ConfigParser()
