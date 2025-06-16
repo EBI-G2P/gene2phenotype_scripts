@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import subprocess 
+import subprocess
 import argparse
 import os
 import sys
@@ -13,38 +13,39 @@ from openpyxl import Workbook
 from typing import Any
 from configparser import ConfigParser
 import io
+
 # Mapping terms to GenCC IDs
 allelic_requirement = {
-    "biallelic_autosomal" : "HP:0000007",
-    "monoallelic_autosomal" : "HP:0000006",
-    "monoallelic_X_hemizygous"  : "HP:0001417",
-    "monoallelic_Y_hemizygous" : "HP:0001450",
-    "monoallelic_X_heterozygous" : "HP:0001417",
-    "mitochondrial" : "HP:0001427",
-    "monoallelic_PAR" : "HP:0000006",
-    "biallelic_PAR" : "HP:0000007"
+    "biallelic_autosomal": "HP:0000007",
+    "monoallelic_autosomal": "HP:0000006",
+    "monoallelic_X_hemizygous": "HP:0001417",
+    "monoallelic_Y_hemizygous": "HP:0001450",
+    "monoallelic_X_heterozygous": "HP:0001417",
+    "mitochondrial": "HP:0001427",
+    "monoallelic_PAR": "HP:0000006",
+    "biallelic_PAR": "HP:0000007",
 }
 confidence_category = {
-    "definitive" : "GENCC:100001",
-    "strong" : "GENCC:100002",
-    "moderate" : "GENCC:100003",
-    "limited" : "GENCC:100004",
+    "definitive": "GENCC:100001",
+    "strong": "GENCC:100002",
+    "moderate": "GENCC:100003",
+    "limited": "GENCC:100004",
     "disputed": "GENCC:100005",
-    "refuted": "GENCC:100006"
+    "refuted": "GENCC:100006",
 }
 
 
-def fetch_g2p_records(data: dict[str, Any])-> requests.Response:
+def fetch_g2p_records(data: dict[str, Any]) -> requests.Response:
     """Fetches the G2P record using all the panels download
-    User is not authenticated to ensure only visible panels is downloaded 
+    User is not authenticated to ensure only visible panels is downloaded
 
     Args:
         data (dict[str, Any]): The DB and API configuration dictionary
 
     Returns:
         requests.Response: The response object from the get request
-    """    
-    
+    """
+
     fetch_g2p_records = "panel/all/download/"
 
     url = data["api_url"] + fetch_g2p_records
@@ -53,8 +54,9 @@ def fetch_g2p_records(data: dict[str, Any])-> requests.Response:
     if response.status_code == 200:
         return response
 
-    else: 
+    else:
         sys.exit("Issues downloading the file")
+
 
 def reading_data(response: requests.Response) -> list:
     """Reads the data from the response and converts it to a csv.DictReader
@@ -64,14 +66,15 @@ def reading_data(response: requests.Response) -> list:
 
     Returns:
         list: The list reader
-    """    
-    
+    """
+
     csv_content = io.StringIO(response.content.decode("utf-8"))
     reader = csv.DictReader(csv_content)
 
     return reader
 
-def get_unsubmitted_record(data: dict[str, Any])-> list:
+
+def get_unsubmitted_record(data: dict[str, Any]) -> list:
     """Gets the unsubmitted records from the API
 
     Args:
@@ -79,7 +82,7 @@ def get_unsubmitted_record(data: dict[str, Any])-> list:
 
     Returns:
         list: Returns a list of unsubmitted ids
-    """    
+    """
     fetch_unsubmitted_record = "unsubmitted-stable-ids/"
 
     url = data["api_url"] + fetch_unsubmitted_record
@@ -91,59 +94,71 @@ def get_unsubmitted_record(data: dict[str, Any])-> list:
     else:
         print("Could not fetch unsubmitted records")
 
+
 def retrieve_unsubmitted_records(data: dict[str, Any], unsubmitted: list) -> list:
     """Retrieves unsubmitted records from the read data from the file
 
     Args:
         data (dict[str, Any]): Content of the CSV file
-        unsubmitted (list): List of unsubmitted ids 
+        unsubmitted (list): List of unsubmitted ids
 
     Returns:
         list: List of the records that have not been submitted
-    """    
+    """
     records = [row for row in data if row["g2p id"] in unsubmitted]
 
     return records
 
-def create_gencc_submission_record(data:dict[str, Any], submission_id: str, date: str, type_of: str, stable_id: str):
+
+def create_gencc_submission_record(
+    data: dict[str, Any], submission_id: str, date: str, type_of: str, stable_id: str
+):
     """Creates the GenCC submission record by creating the record in the gencc_submission table of the DB
 
     Args:
         data (dict[str, Any]): DB configuration data
         submission_id (str): Submission id
         date (str): date
-        type_of (str): Usually create 
-        stable_id (str): G2P stable id 
-    """    
- 
+        type_of (str): Usually create
+        stable_id (str): G2P stable id
+    """
+
     create_url = "gencc_create/"
 
     login_url = "login/"
 
     login_info = {"username": data["username"], "password": data["password"]}
 
-    response = requests.post(data["api_url"]+login_url, json=login_info)
+    response = requests.post(data["api_url"] + login_url, json=login_info)
     create_info = {
         "submission_id": submission_id,
         "date_of_submission": date,
         "type_of_submission": type_of,
-        "g2p_stable_id" : stable_id
+        "g2p_stable_id": stable_id,
     }
     if response.status_code == 200:
         try:
             response_create = requests.post(
-                data["api_url"]+create_url, json=create_info, cookies=response.cookies
+                data["api_url"] + create_url, json=create_info, cookies=response.cookies
             )
             if response_create.status_code in (200, 201):
-                print(f"GenCC submission for the record {stable_id} was created successfully")
+                print(
+                    f"GenCC submission for the record {stable_id} was created successfully"
+                )
             else:
-                print(f"Issues creating the submissions {response_create.status_code} {response_create.json}")
+                print(
+                    f"Issues creating the submissions {response_create.status_code} {response_create.json}"
+                )
         except Exception as e:
-            print('Error:', e)
+            print("Error:", e)
 
-def write_to_the_GenCC_file(data: dict[str, Any], outfile: str, dry: str, db_config: dict[str, Any]) -> str:
+
+def write_to_the_GenCC_file(
+    data: dict[str, Any], outfile: str, dry: str, db_config: dict[str, Any]
+) -> str:
     """Creates the G2P_GenCC.txt and also calls the create the gencc_submission function when dry is False,
     A real run
+    Also writes out records with no disease id
 
     Args:
         data (dict[str, Any]): Record of unsubmitted ids
@@ -153,78 +168,92 @@ def write_to_the_GenCC_file(data: dict[str, Any], outfile: str, dry: str, db_con
 
     Returns:
         str: An output file
-    """    
-    with open(outfile, mode='w') as output_file:
-         output_file.write("submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tpmids\tassertion_criteria_url\n")
-        
-         submission_id_base = "1000112"
-         for record in data:
-             g2p_id = record['g2p id']
-             submission_id = submission_id_base + str(g2p_id[3:])
+    """
+    with open(outfile, mode="w") as output_file:
+        output_file.write(
+            "submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tpmids\tassertion_criteria_url\n"
+        )
+        issues_with_record = []
+        submission_id_base = "1000112"
+        for record in data:
+            g2p_id = record["g2p id"]
+            submission_id = submission_id_base + str(g2p_id[3:])
 
-             hgnc_id = record['hgnc id']
-             hgnc_symbol = record['gene symbol']
+            hgnc_id = record["hgnc id"]
+            hgnc_symbol = record["gene symbol"]
 
-             disease_id = record['disease mim'] or record['disease MONDO']
-             disease_name = record['disease name']
-             moi_id = allelic_requirement[record['allelic requirement']]
-             moi_name = record['allelic requirement']
-             submitter_id = 'GENCC:000112'
-             submitter_name = 'TGMI G2P'
-             classification_id = confidence_category[record['confidence']]
-             classification_name = record["confidence"]
-             dt = datetime.fromisoformat(record['date of last review'])
-             date = dt.strftime("%Y/%m/%d")
-             record_url = "https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id
-             pmids = record['publications']
-             assertion_criteria_url = "https://www.ebi.ac.uk/gene2phenotype/terminology"
+            disease_id = record["disease mim"] or record["disease MONDO"]
+            if disease_id is None:
+                issues_with_record.append(g2p_id)
+                continue
+            disease_name = record["disease name"]
+            moi_id = allelic_requirement[record["allelic requirement"]]
+            moi_name = record["allelic requirement"]
+            submitter_id = "GENCC:000112"
+            submitter_name = "TGMI G2P"
+            classification_id = confidence_category[record["confidence"]]
+            classification_name = record["confidence"]
+            dt = datetime.fromisoformat(record["date of last review"])
+            date = dt.strftime("%Y/%m/%d")
+            record_url = "https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id
+            pmids = record["publications"]
+            assertion_criteria_url = "https://www.ebi.ac.uk/gene2phenotype/terminology"
 
-             line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
-             output_file.write(line_to_output)
-             if dry == "False":
-                 type_of = "create"
-                 db_date = create_datetime_now()
-                 create_gencc_submission_record(db_config, submission_id, db_date, type_of, g2p_id)
+            line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
+            output_file.write(line_to_output)
+            if dry == "False":
+                type_of = "create"
+                db_date = create_datetime_now()
+                create_gencc_submission_record(
+                    db_config, submission_id, db_date, type_of, g2p_id
+                )
+            if len(issues_with_record) > 0:
+                with open("record_with_issues.txt", mode="w") as textfile:
+                    for issues in issues_with_record:
+                        textfile.write(f"{issues}\n")
     return outfile
 
-def create_datetime_now()-> date:
+
+def create_datetime_now() -> date:
     """Creates datetime at present and formats it to YYYY-MM-DD
 
     Returns:
         date: Formatted date
-    """    
+    """
 
     time_now = datetime.now()
     db_date = time_now.strftime("%Y-%m-%d")
     return db_date
 
+
 def convert_txt_to_excel(input_file: str, output_file: str):
-    """Converts txt to Excel file 
+    """Converts txt to Excel file
 
     Args:
         input_file (str): Text file to be converted
-        output_file (str): Excel file that will be created 
-    """    
+        output_file (str): Excel file that will be created
+    """
     wb = Workbook()
     ws = wb.active
 
-    delimiter='\t'
+    delimiter = "\t"
 
-    with open(input_file, 'r') as file:
+    with open(input_file, "r") as file:
         for row_index, line in enumerate(file, start=1):
             for col_index, value in enumerate(line.strip().split(delimiter), start=1):
                 ws.cell(row=row_index, column=col_index, value=value)
     wb.save(output_file)
 
+
 def read_from_config_file(config_file: str) -> dict[str, Any]:
-    """Reads from Configuration file (config.ini) and creates a dictionary of data 
+    """Reads from Configuration file (config.ini) and creates a dictionary of data
 
     Args:
         config_file (str): configuration file
 
     Returns:
         dict[str, Any]: DB/API configuration dict
-    """    
+    """
     data = {}
     config = ConfigParser()
     config.read(config_file)
@@ -242,18 +271,23 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("-p", "--path",
-                    # default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
-                    help="Path where the G2P and GenCC files are going to be saved",
-                    required=False)
+    ap.add_argument(
+        "-p",
+        "--path",
+        # default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
+        help="Path where the G2P and GenCC files are going to be saved",
+        required=False,
+    )
     ap.add_argument("--config_file", required=True, help="G2P Configuration file")
-    ap.add_argument("--dry", required=False, help="If dry is False, it creates an actual GenCC submission so updates the db" )
+    ap.add_argument(
+        "--dry",
+        required=False,
+        help="If dry is False, it creates an actual GenCC submission so updates the db",
+    )
     args = ap.parse_args()
 
     # ensembl_dir = os.environ.get('ENSEMBL_ROOT_DIR')
     db_config = read_from_config_file(args.config_file)
-   
-
 
     if args.dry:
         dry = args.dry
@@ -264,11 +298,10 @@ def main():
         path = args.path
         gencc_dir = args.path + create_datetime_now()
         output_file = f"{gencc_dir}/G2P_GenCC.txt"
-        final_output_file =  f"{gencc_dir}/G2P_GenCC.xlsx"
+        final_output_file = f"{gencc_dir}/G2P_GenCC.xlsx"
     else:
         output_file = "G2P_GenCC.txt"
         final_output_file = "G2P_GenCC.xlsx"
-
 
     print("\nDownloading G2P files...")
     file_data = fetch_g2p_records(db_config)
@@ -278,5 +311,6 @@ def main():
     outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
     convert_txt_to_excel(outfile, final_output_file)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
