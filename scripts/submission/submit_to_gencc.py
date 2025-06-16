@@ -126,11 +126,14 @@ def write_to_the_GenCC_file(data: dict[str, Any], outfile, dry, db_config):
              output_file.write(line_to_output)
              if dry == "False":
                  type_of = "create"
-                 db_date = dt.strftime("%Y-%m-%d") 
+                 db_date = create_datetime_now()
                  create_gencc_submission_record(db_config, submission_id, db_date, type_of, g2p_id)
     return output_file
 
-
+def create_datetime_now():
+    time_now = datetime.now()
+    db_date = time_now.strftime("%Y-%m-%d")
+    return db_date
 
 def convert_txt_to_excel(input_file, output_file):
     """
@@ -173,9 +176,9 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
 
 def main():
     ap = argparse.ArgumentParser()
-    # ap.add_argument("-p", "--path",
-    #                 default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
-    #                 help="Path where the G2P and GenCC files are going to be saved")
+    ap.add_argument("-p", "--path",
+                    default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
+                    help="Path where the G2P and GenCC files are going to be saved")
     ap.add_argument("--config_file", required=True, help="G2P Configuration file")
     ap.add_argument("--dry", required=False, help="If dry is False, it creates an actual GenCC submission so updates the db" )
     args = ap.parse_args()
@@ -188,15 +191,15 @@ def main():
     if args.dry:
         dry = args.dry
 
-    # if not ensembl_dir or not os.path.exists(f"{ensembl_dir}/ensembl-gene2phenotype/scripts/download_file.sh"):
-    #     raise FileNotFoundError("ENSEMBL_ROOT_DIR is not set correctly or the script does not exist")
+    gencc_dir = args.path + create_datetime_now()
+
 
     print("\nDownloading G2P files...")
     file_data = fetch_g2p_records(db_config)
     read_data = reading_data(file_data)
     unsubmitted = get_unsubmitted_record(db_config)
     common = retrieve_unsubmitted_records(read_data, unsubmitted)
-    output_file = "G2P_GenCC.txt"
+    output_file = f"{gencc_dir}/G2P_GenCC.txt"
     outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
     #lonvert_txt_to_excel(outfile, final_output_file)
 
