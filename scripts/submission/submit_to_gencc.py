@@ -89,8 +89,7 @@ def get_unsubmitted_record(data: dict[str, Any]) -> list:
     response = requests.get(url)
     if response.status_code == 200:
         unsubmitted = json.loads(response.content)
-        unsubmitted_ids = {record["stable_id"] for record in unsubmitted}
-        return unsubmitted_ids
+        return unsubmitted
     else:
         print("Could not fetch unsubmitted records")
 
