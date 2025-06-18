@@ -402,7 +402,6 @@ def main():
         dry = True
 
     if args.path:
-        path = args.path
         gencc_dir = args.path + create_datetime_now()
         output_file = f"{gencc_dir}/G2P_GenCC.txt"
         final_output_file = f"{gencc_dir}/G2P_GenCC.xlsx"
