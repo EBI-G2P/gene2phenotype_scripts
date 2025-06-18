@@ -95,13 +95,13 @@ def get_unsubmitted_record(data: dict[str, Any]) -> list:
 
 
 def get_later_review_date(data: dict[str, Any])-> list:
-    """_summary_
+    """Gets later review date
 
     Args:
-        data (dict[str, Any]): _description_
+        data (dict[str, Any]): DB/api configuration
 
     Returns:
-        list: _description_
+        list: Containing submission ids 
     """    
     fetch_later_review_date = "later_review_date/"
 
@@ -128,7 +128,16 @@ def retrieve_unsubmitted_records(data: dict[str, Any], unsubmitted: list) -> lis
 
     return records
 
-def get_stable_id_associated_with_the_submission(data: dict[str, Any], submission_id: str):
+def get_stable_id_associated_with_the_submission(data: dict[str, Any], submission_id: str) -> str:
+    """Gets stable ids associated with the submissions
+
+    Args:
+        data (dict[str, Any]): DB/API configuration
+        submission_id (str): Submission id
+
+    Returns:
+        str: Stable id strings which would be used in comparison
+    """    
 
     fetch_record_data = f"submissions/{submission_id}"
 
@@ -150,6 +159,17 @@ def read_from_old_gencc_submission(file: str) -> list:
     return data
 
 def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: list, data: dict[str, Any])-> list:
+    """Compare data changes between what has been submitted and what is about to be unsubmitted for submission with later review date
+
+    Args:
+        old_reader (list): Old file data
+        later_date_ids (list): The later date ids
+        new_reader (list): New G2P file data
+        data (dict[str, Any]): DB/API configuration
+
+    Returns:
+        list: List of data that has had changes.
+    """    
     updated_data = []
 
     new_data_lookup = {row["g2p id"]: row for row in new_reader}
@@ -222,7 +242,16 @@ def create_gencc_submission_record(
         except Exception as e:
             print("Error:", e)
 
-def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list):
+def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list)-> list:
+    """Merging data
+
+    Args:
+        updated_data (list): Updated data from later review date checks
+        data (list): Unsubmitted ids data
+
+    Returns:
+        list: Merged list of both of them
+    """    
     return updated_data + data
 
 def write_to_the_GenCC_file(
