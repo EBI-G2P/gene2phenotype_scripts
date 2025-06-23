@@ -301,7 +301,7 @@ def write_to_the_GenCC_file(
 
             line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
             output_file.write(line_to_output)
-            if dry == "False":
+            if dry == "True":
                 type_of = "create"
                 db_date = create_datetime_now()
                 create_gencc_submission_record(
@@ -374,32 +374,33 @@ def main():
     ap.add_argument(
         "-p",
         "--path",
-        # default='/nfs/production/flicek/ensembl/variation/G2P/GenCC_create/',
         help="Path where the G2P and GenCC files are going to be saved",
         required=False,
     )
     ap.add_argument("--config_file", required=True, help="G2P Configuration file")
     ap.add_argument(
-        "--dry",
+        "--write_to_db",
         required=False,
-        help="If dry is False, it creates an actual GenCC submission so updates the db",
+        action="store_true",
     )
     ap.add_argument(
         "--new",
-        required=True,
+        action="store_true",
+        required=False,
         help="If new submission, true then it requires a whole new submission and does no checks",
+
     )
-    ap.add_argument("--old_file", required=False, help="Old file to compare changes in G2P ids")
+    ap.add_argument("--old_file", required=False, help="Old file to compare changes in G2P ids in txt format")
     args = ap.parse_args()
 
     if args.new and args.old_file:
         ap.error("Can not use --new and --old_file at the same time.")
     db_config = read_from_config_file(args.config_file)
 
-    if args.dry:
-        dry = args.dry
+    if args.write_to_db:
+        dry = "True"
     else:
-        dry = True
+        dry = "False"
 
     if args.path:
         gencc_dir = args.path + create_datetime_now()
@@ -412,7 +413,7 @@ def main():
     print("\nDownloading G2P files...")
     file_data = fetch_g2p_records(db_config)
     read_data = reading_data(file_data)
-    if args.new == "False":
+    if args.new:
         unsubmitted = get_unsubmitted_record(db_config)
         common = retrieve_unsubmitted_records(read_data, unsubmitted)
         if args.old_file:
