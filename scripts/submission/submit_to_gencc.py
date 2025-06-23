@@ -388,13 +388,13 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
     return data
 
 def get_output_paths(path: str) -> Tuple[ str, str, str]:
-    """_summary_
+    """Gets the output path from the args.path
 
     Args:
-        path (str): _description_
+        path (str): The path (args.path)
 
     Returns:
-        Tuple[str, str, str]: _description_
+        Tuple[str, str, str]: Gencc dir (args.path if given), output file and final_output_file
     """    
     if path:
         gencc_dir = path + create_datetime_now()
@@ -406,31 +406,31 @@ def get_output_paths(path: str) -> Tuple[ str, str, str]:
     return gencc_dir if path else ".", output_file, final_output_file
 
 def handle_new_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any]) -> write_to_the_GenCC_file:
-    """_summary_
+    """Handles new submission, so new generation of the G2P records and GenCC data 
 
     Args:
-        read_data (list): _description_
-        output_file (str): _description_
-        dry (bool): _description_
-        db_config (dict[str, Any]): _description_
+        read_data (list): Data from the G2P all records file
+        output_file (str): Output text file where the submission will be written into
+        dry (bool): Boolean (args.dry)
+        db_config (dict[str, Any]): DB/API configuration
 
     Returns:
-        write_to_the_GenCC_file: _description_
+        write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
     """    
     return write_to_the_GenCC_file(read_data, output_file, str(dry), db_config)
 
 def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any], old_file: str) -> write_to_the_GenCC_file:
-    """_summary_
+    """Handles existing submission.
 
     Args:
-        read_data (list): _description_
-        output_file (str): _description_
-        dry (bool): _description_
-        db_config (dict[str, Any]): _description_
-        old_file (str): _description_
+        read_data (list): Data from the G2P all records file
+        output_file (str): Output text file where the submission will be written into
+        dry (bool): Boolean (args.dry)
+        db_config (dict[str, Any]): DB/API configuration
+        old_file (str) : Old file containing submitted GenCC submission to allow comparison
 
     Returns:
-        write_to_the_GenCC_file: _description_
+        write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
     """    
     unsubmitted = get_unsubmitted_record(db_config)
     common = retrieve_unsubmitted_records(read_data, unsubmitted)
