@@ -9,7 +9,7 @@ import requests
 import json
 import csv
 from openpyxl import Workbook
-from typing import Any
+from typing import Any, Tuple
 from configparser import ConfigParser
 import io
 
@@ -291,6 +291,7 @@ def write_to_the_GenCC_file(
             "submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tpmids\tassertion_criteria_url\n"
         )
         issues_with_record = []
+        gencc_list = []
         submission_id_base = "1000112"
         for record in data:
             g2p_id = record["g2p id"]
@@ -321,7 +322,6 @@ def write_to_the_GenCC_file(
             if dry == "True":
                 type_of = "create"
                 db_date = create_datetime_now()
-                gencc_list = []
                 created_record = create_gencc_submission_record(
                     submission_id, db_date, type_of, g2p_id
                 )
@@ -330,9 +330,7 @@ def write_to_the_GenCC_file(
                 with open("record_with_issues.txt", mode="w") as textfile:
                     for issues in issues_with_record:
                         textfile.write(f"{issues}\n")
-        if dry == "True":
-            post_gencc_submission(gencc_list, db_config)
-    return outfile
+    return outfile, gencc_list
 
 
 def create_datetime_now() -> date:
@@ -389,6 +387,62 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
 
     return data
 
+def get_output_paths(path: str) -> Tuple[ str, str, str]:
+    """_summary_
+
+    Args:
+        path (str): _description_
+
+    Returns:
+        Tuple[str, str, str]: _description_
+    """    
+    if path:
+        gencc_dir = path + create_datetime_now()
+        output_file = f"{gencc_dir}/G2P_GenCC.txt"
+        final_output_file = f"{gencc_dir}/G2P_GenCC.xlsx"
+    else:
+        output_file = "G2P_GenCC.txt"
+        final_output_file = "G2P_GenCC.xlsx"
+    return gencc_dir if path else ".", output_file, final_output_file
+
+def handle_new_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any]) -> write_to_the_GenCC_file:
+    """_summary_
+
+    Args:
+        read_data (list): _description_
+        output_file (str): _description_
+        dry (bool): _description_
+        db_config (dict[str, Any]): _description_
+
+    Returns:
+        write_to_the_GenCC_file: _description_
+    """    
+    return write_to_the_GenCC_file(read_data, output_file, str(dry), db_config)
+
+def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any], old_file: str) -> write_to_the_GenCC_file:
+    """_summary_
+
+    Args:
+        read_data (list): _description_
+        output_file (str): _description_
+        dry (bool): _description_
+        db_config (dict[str, Any]): _description_
+        old_file (str): _description_
+
+    Returns:
+        write_to_the_GenCC_file: _description_
+    """    
+    unsubmitted = get_unsubmitted_record(db_config)
+    common = retrieve_unsubmitted_records(read_data, unsubmitted)
+
+    if old_file:
+        old_reader = read_from_old_gencc_submission(old_file)
+        later_review = get_later_review_date(db_config)
+        compared = compare_data_changes(old_reader, later_review, read_data, db_config)
+        merged_data = add_unsubmitted_ids_and_later_review_date(compared, common)
+        return write_to_the_GenCC_file(merged_data, output_file, str(dry), db_config)
+    else:
+        return write_to_the_GenCC_file(common, output_file, str(dry), db_config)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -415,41 +469,27 @@ def main():
     args = ap.parse_args()
 
     if args.new and args.old_file:
-        ap.error("Can not use --new and --old_file at the same time.")
+        ap.error("Cannot use --new and --old_file at the same time.")
+
     db_config = read_from_config_file(args.config_file)
+    dry_run = args.write_to_db
 
-    if args.write_to_db:
-        dry = "True"
-    else:
-        dry = "False"
-
-    if args.path:
-        gencc_dir = args.path + create_datetime_now()
-        output_file = f"{gencc_dir}/G2P_GenCC.txt"
-        final_output_file = f"{gencc_dir}/G2P_GenCC.xlsx"
-    else:
-        output_file = "G2P_GenCC.txt"
-        final_output_file = "G2P_GenCC.xlsx"
+    gencc_dir, output_file, final_output_file = get_output_paths(args.path)
 
     print("\nDownloading G2P files...")
     file_data = fetch_g2p_records(db_config)
+    print("Read data from downloaded file")
     read_data = reading_data(file_data)
+
     if args.new:
-        outfile = write_to_the_GenCC_file(read_data, output_file, dry, db_config)
+        outfile, gencc_list = handle_new_submission(read_data, output_file, dry_run, db_config)
     else:
-        unsubmitted = get_unsubmitted_record(db_config)
-        common = retrieve_unsubmitted_records(read_data, unsubmitted)
-        if args.old_file:
-            old_reader = read_from_old_gencc_submission(args.old_file)
-            later_review = get_later_review_date(db_config)
-            compared = compare_data_changes(old_reader, later_review, read_data, db_config)
-            merged_data = add_unsubmitted_ids_and_later_review_date(compared, common)
-            outfile = write_to_the_GenCC_file(merged_data, output_file, dry, db_config)
-        else:
-            outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
-        
+        outfile, gencc_list = handle_existing_submission(read_data, output_file, dry_run, db_config, args.old_file)
 
     convert_txt_to_excel(outfile, final_output_file)
+
+    if args.write_to_db:
+        post_gencc_submission(gencc_list, db_config)
 
 
 if __name__ == "__main__":
