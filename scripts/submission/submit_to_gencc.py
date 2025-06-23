@@ -7,7 +7,6 @@ import sys
 from datetime import date, datetime
 import requests
 import json
-import gzip
 import csv
 from openpyxl import Workbook
 from typing import Any
@@ -393,7 +392,8 @@ def main():
     ap.add_argument("--old_file", required=False, help="Old file to compare changes in G2P ids")
     args = ap.parse_args()
 
-    # ensembl_dir = os.environ.get('ENSEMBL_ROOT_DIR')
+    if args.new and args.old_file:
+        ap.error("Can not use --new and --old_file at the same time.")
     db_config = read_from_config_file(args.config_file)
 
     if args.dry:
