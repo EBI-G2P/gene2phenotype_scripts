@@ -151,6 +151,14 @@ def get_stable_id_associated_with_the_submission(data: dict[str, Any], submissio
 
 
 def read_from_old_gencc_submission(file: str) -> list:
+    """Read from old GenCC submission txt file
+
+    Args:
+        file (str): File name
+
+    Returns:
+        list: The list of data
+    """    
     with open(file, "r", encoding="utf-8") as opened:
         reader = csv.DictReader(opened, delimiter='\t')
         data = list(reader)
@@ -199,19 +207,34 @@ def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: lis
 
     return updated_data
 
-def create_gencc_submission_record(
-    data: dict[str, Any], submission_id: str, date: str, type_of: str, stable_id: str
+def create_gencc_submission_record( submission_id: str, date: str, type_of: str, stable_id: str
 ):
     """Creates the GenCC submission record by creating the record in the gencc_submission table of the DB
 
     Args:
-        data (dict[str, Any]): DB configuration data
         submission_id (str): Submission id
         date (str): date
         type_of (str): Usually create
         stable_id (str): G2P stable id
     """
+    create_info = {
+        "submission_id": submission_id,
+        "date_of_submission": date,
+        "type_of_submission": type_of,
+        "g2p_stable_id": stable_id,
+    }
 
+    return create_info
+
+def post_gencc_submission(list_of_data: list, data:dict[str, Any]):
+    """Create GenCC submission record, using bulk create
+
+    Args:
+        list_of_data (list): _description_
+        data (dict[str, Any]): _description_
+
+    """
+    
     create_url = "gencc_create/"
 
     login_url = "login/"
@@ -219,20 +242,14 @@ def create_gencc_submission_record(
     login_info = {"username": data["username"], "password": data["password"]}
 
     response = requests.post(data["api_url"] + login_url, json=login_info)
-    create_info = {
-        "submission_id": submission_id,
-        "date_of_submission": date,
-        "type_of_submission": type_of,
-        "g2p_stable_id": stable_id,
-    }
     if response.status_code == 200:
         try:
             response_create = requests.post(
-                data["api_url"] + create_url, json=create_info, cookies=response.cookies
+                data["api_url"] + create_url, json=list_of_data, cookies=response.cookies
             )
             if response_create.status_code in (200, 201):
                 print(
-                    f"GenCC submission for the record {stable_id} was created successfully"
+                    f"GenCC submission for the records was created successfully"
                 )
             else:
                 print(
@@ -289,8 +306,8 @@ def write_to_the_GenCC_file(
             disease_name = record["disease name"]
             moi_id = allelic_requirement[record["allelic requirement"]]
             moi_name = record["allelic requirement"]
-            submitter_id = "GENCC:000112"
-            submitter_name = "TGMI G2P"
+            submitter_id = "GENCC:000113"
+            submitter_name = "G2P"
             classification_id = confidence_category[record["confidence"]]
             classification_name = record["confidence"]
             dt = datetime.fromisoformat(record["date of last review"])
@@ -304,13 +321,17 @@ def write_to_the_GenCC_file(
             if dry == "True":
                 type_of = "create"
                 db_date = create_datetime_now()
-                create_gencc_submission_record(
-                    db_config, submission_id, db_date, type_of, g2p_id
+                gencc_list = []
+                created_record = create_gencc_submission_record(
+                    submission_id, db_date, type_of, g2p_id
                 )
+                gencc_list.append(created_record)
             if len(issues_with_record) > 0:
                 with open("record_with_issues.txt", mode="w") as textfile:
                     for issues in issues_with_record:
                         textfile.write(f"{issues}\n")
+        if dry == "True":
+            post_gencc_submission(gencc_list, db_config)
     return outfile
 
 
@@ -414,6 +435,8 @@ def main():
     file_data = fetch_g2p_records(db_config)
     read_data = reading_data(file_data)
     if args.new:
+        outfile = write_to_the_GenCC_file(read_data, output_file, dry, db_config)
+    else:
         unsubmitted = get_unsubmitted_record(db_config)
         common = retrieve_unsubmitted_records(read_data, unsubmitted)
         if args.old_file:
@@ -422,10 +445,10 @@ def main():
             compared = compare_data_changes(old_reader, later_review, read_data, db_config)
             merged_data = add_unsubmitted_ids_and_later_review_date(compared, common)
             outfile = write_to_the_GenCC_file(merged_data, output_file, dry, db_config)
-        outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
-    else:
-        outfile = write_to_the_GenCC_file(read_data, output_file, dry, db_config )
-    
+        else:
+            outfile = write_to_the_GenCC_file(common, output_file, dry, db_config)
+        
+
     convert_txt_to_excel(outfile, final_output_file)
 
 
