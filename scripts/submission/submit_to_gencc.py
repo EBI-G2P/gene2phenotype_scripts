@@ -82,7 +82,7 @@ def get_unsubmitted_record(data: dict[str, Any]) -> list:
     Returns:
         list: Returns a list of unsubmitted ids
     """
-    fetch_unsubmitted_record = "unsubmitted-stable-ids/"
+    fetch_unsubmitted_record = "unsubmitted_stable_ids/"
 
     url = data["api_url"] + fetch_unsubmitted_record
     response = requests.get(url)
@@ -319,7 +319,7 @@ def write_to_the_GenCC_file(
 
             line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
             output_file.write(line_to_output)
-            if dry == "True":
+            if dry is True:
                 type_of = "create"
                 db_date = create_datetime_now()
                 created_record = create_gencc_submission_record(
@@ -330,6 +330,7 @@ def write_to_the_GenCC_file(
                 with open("record_with_issues.txt", mode="w") as textfile:
                     for issues in issues_with_record:
                         textfile.write(f"{issues}\n")
+    
     return outfile, gencc_list
 
 
@@ -397,13 +398,17 @@ def get_output_paths(path: str) -> Tuple[ str, str, str]:
         Tuple[str, str, str]: Gencc dir (args.path if given), output file and final_output_file
     """    
     if path:
-        gencc_dir = path + create_datetime_now()
-        output_file = f"{gencc_dir}/G2P_GenCC.txt"
-        final_output_file = f"{gencc_dir}/G2P_GenCC.xlsx"
+        timestamp = create_datetime_now()
+        gencc_dir = os.path.join(path, timestamp)
+        os.makedirs(gencc_dir, exist_ok=True) # to make the directory
+
+        output_file = os.path.join(gencc_dir, "G2P_GenCC.txt")
+        final_output_file = os.path.join(gencc_dir, "G2P_GenCC.xlsx")
+        return gencc_dir, output_file, final_output_file
     else:
         output_file = "G2P_GenCC.txt"
         final_output_file = "G2P_GenCC.xlsx"
-    return gencc_dir if path else ".", output_file, final_output_file
+        return ".", output_file, final_output_file
 
 def handle_new_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any]) -> write_to_the_GenCC_file:
     """Handles new submission, so new generation of the G2P records and GenCC data 
@@ -417,7 +422,7 @@ def handle_new_submission(read_data: list, output_file: str, dry: bool, db_confi
     Returns:
         write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
     """    
-    return write_to_the_GenCC_file(read_data, output_file, str(dry), db_config)
+    return write_to_the_GenCC_file(read_data, output_file, dry, db_config)
 
 def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any], old_file: str) -> write_to_the_GenCC_file:
     """Handles existing submission.
@@ -440,9 +445,9 @@ def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_
         later_review = get_later_review_date(db_config)
         compared = compare_data_changes(old_reader, later_review, read_data, db_config)
         merged_data = add_unsubmitted_ids_and_later_review_date(compared, common)
-        return write_to_the_GenCC_file(merged_data, output_file, str(dry), db_config)
+        return write_to_the_GenCC_file(merged_data, output_file, dry, db_config)
     else:
-        return write_to_the_GenCC_file(common, output_file, str(dry), db_config)
+        return write_to_the_GenCC_file(common, output_file, dry, db_config)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -462,7 +467,7 @@ def main():
         "--new",
         action="store_true",
         required=False,
-        help="If new submission, true then it requires a whole new submission and does no checks",
+        help="New is used to determine if this is a new or clean GenCC submission, so no checks on the submission id or stable id will be done",
 
     )
     ap.add_argument("--old_file", required=False, help="Old file to compare changes in G2P ids in txt format")
@@ -476,19 +481,23 @@ def main():
 
     gencc_dir, output_file, final_output_file = get_output_paths(args.path)
 
-    print("\nDownloading G2P files...")
+    print("Downloading G2P files...")
     file_data = fetch_g2p_records(db_config)
-    print("Read data from downloaded file")
+    print("Reading data from downloaded file")
     read_data = reading_data(file_data)
 
     if args.new:
+        print("Handling new submission")
         outfile, gencc_list = handle_new_submission(read_data, output_file, dry_run, db_config)
     else:
+        print("Handling existing submission")
         outfile, gencc_list = handle_existing_submission(read_data, output_file, dry_run, db_config, args.old_file)
 
+    print("Converting text file to Excel file")
     convert_txt_to_excel(outfile, final_output_file)
 
     if args.write_to_db:
+        print("Writing submission to the database")
         post_gencc_submission(gencc_list, db_config)
 
 
