@@ -70,7 +70,7 @@ def reading_data(response: requests.Response) -> list:
     csv_content = io.StringIO(response.content.decode("utf-8"))
     reader = csv.DictReader(csv_content)
 
-    return reader
+    return list(reader)
 
 
 def get_unsubmitted_record(data: dict[str, Any]) -> list:
@@ -93,15 +93,15 @@ def get_unsubmitted_record(data: dict[str, Any]) -> list:
         print("Could not fetch unsubmitted records")
 
 
-def get_later_review_date(data: dict[str, Any])-> list:
+def get_later_review_date(data: dict[str, Any]) -> list:
     """Gets later review date
 
     Args:
         data (dict[str, Any]): DB/api configuration
 
     Returns:
-        list: Containing submission ids 
-    """    
+        list: Containing submission ids
+    """
     fetch_later_review_date = "later_review_date/"
 
     url = data["api_url"] + fetch_later_review_date
@@ -111,9 +111,9 @@ def get_later_review_date(data: dict[str, Any])-> list:
         return later_date["ids"]
     else:
         print("Could not fetch later review date")
-        
 
-def retrieve_unsubmitted_records(data: dict[str, Any], unsubmitted: list) -> list:
+
+def retrieve_unsubmitted_records(data: list[dict[str, Any]], unsubmitted: list) -> list:
     """Retrieves unsubmitted records from the read data from the file
 
     Args:
@@ -127,7 +127,10 @@ def retrieve_unsubmitted_records(data: dict[str, Any], unsubmitted: list) -> lis
 
     return records
 
-def get_stable_id_associated_with_the_submission(data: dict[str, Any], submission_id: str) -> str:
+
+def get_stable_id_associated_with_the_submission(
+    data: dict[str, Any], submission_id: str
+) -> str:
     """Gets stable ids associated with the submissions
 
     Args:
@@ -136,7 +139,7 @@ def get_stable_id_associated_with_the_submission(data: dict[str, Any], submissio
 
     Returns:
         str: Stable id strings which would be used in comparison
-    """    
+    """
 
     fetch_record_data = f"submissions/{submission_id}"
 
@@ -158,14 +161,17 @@ def read_from_old_gencc_submission(file: str) -> list:
 
     Returns:
         list: The list of data
-    """    
+    """
     with open(file, "r", encoding="utf-8") as opened:
-        reader = csv.DictReader(opened, delimiter='\t')
+        reader = csv.DictReader(opened, delimiter="\t")
         data = list(reader)
 
     return data
 
-def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: list, data: dict[str, Any])-> list:
+
+def compare_data_changes(
+    old_reader: list, later_date_ids: list, new_reader: list, data: dict[str, Any]
+) -> list:
     """Compare data changes between what has been submitted and what is about to be unsubmitted for submission with later review date
 
     Args:
@@ -176,7 +182,7 @@ def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: lis
 
     Returns:
         list: List of data that has had changes.
-    """    
+    """
     updated_data = []
 
     new_data_lookup = {row["g2p id"]: row for row in new_reader}
@@ -189,12 +195,11 @@ def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: lis
         new_row = new_data_lookup.get(stable_id)
 
         if not new_row:
-            continue  
-        
-        if (
-            new_row.get("disease mim") != old_row.get("disease id")
-            and new_row.get("disease MONDO") != old_row.get("disease id")
-        ):  
+            continue
+
+        if new_row.get("disease mim") != old_row.get("disease id") and new_row.get(
+            "disease MONDO"
+        ) != old_row.get("disease id"):
             new_row["update"] = 1
             updated_data.append(new_row)
         elif new_row.get("disease name") != old_row.get("disease name"):
@@ -212,7 +217,9 @@ def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: lis
 
     return updated_data
 
-def create_gencc_submission_record( submission_id: str, date: str, type_of: str, stable_id: str
+
+def create_gencc_submission_record(
+    submission_id: str, date: str, type_of: str, stable_id: str
 ):
     """Creates the GenCC submission record by creating the record in the gencc_submission table of the DB
 
@@ -231,7 +238,8 @@ def create_gencc_submission_record( submission_id: str, date: str, type_of: str,
 
     return create_info
 
-def post_gencc_submission(list_of_data: list, data:dict[str, Any]):
+
+def post_gencc_submission(list_of_data: list, data: dict[str, Any]):
     """Create GenCC submission record, using bulk create
 
     Args:
@@ -239,7 +247,7 @@ def post_gencc_submission(list_of_data: list, data:dict[str, Any]):
         data (dict[str, Any]): _description_
 
     """
-    
+
     create_url = "gencc_create/"
 
     login_url = "login/"
@@ -250,12 +258,12 @@ def post_gencc_submission(list_of_data: list, data:dict[str, Any]):
     if response.status_code == 200:
         try:
             response_create = requests.post(
-                data["api_url"] + create_url, json=list_of_data, cookies=response.cookies
+                data["api_url"] + create_url,
+                json=list_of_data,
+                cookies=response.cookies,
             )
             if response_create.status_code in (200, 201):
-                print(
-                    f"GenCC submission for the records was created successfully"
-                )
+                print(f"GenCC submission for the records was created successfully")
             else:
                 print(
                     f"Issues creating the submissions {response_create.status_code} {response_create.json}"
@@ -263,7 +271,8 @@ def post_gencc_submission(list_of_data: list, data:dict[str, Any]):
         except Exception as e:
             print("Error:", e)
 
-def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list)-> list:
+
+def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list) -> list:
     """Merging data
 
     Args:
@@ -272,11 +281,12 @@ def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list)-> 
 
     Returns:
         list: Merged list of both of them
-    """    
+    """
     return updated_data + data
 
+
 def write_to_the_GenCC_file(
-    data: list, outfile: str, dry: str, db_config: dict[str, Any], type_of: str=None
+    data: list, outfile: str, dry: str, db_config: dict[str, Any], type_of: str = None
 ) -> str:
     """Creates the G2P_GenCC.txt and also calls the create the gencc_submission function when dry is False,
     A real run
@@ -336,17 +346,21 @@ def write_to_the_GenCC_file(
                     update = record["update"]
                     if update:
                         type_of = "update"
-                        created_record = create_gencc_submission_record(submission_id, db_date, type_of, g2p_id)
+                        created_record = create_gencc_submission_record(
+                            submission_id, db_date, type_of, g2p_id
+                        )
                         gencc_list.append(created_record)
                     else:
                         type_of = "create"
-                        created_record = create_gencc_submission_record(submission_id, db_date, type_of, g2p_id)
+                        created_record = create_gencc_submission_record(
+                            submission_id, db_date, type_of, g2p_id
+                        )
                         gencc_list.append(created_record)
     if len(issues_with_record) > 0:
         with open("record_with_issues.txt", mode="w") as textfile:
             for issues in issues_with_record:
                 textfile.write(f"{issues}\n")
-    
+
     return outfile, gencc_list
 
 
@@ -404,7 +418,8 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
 
     return data
 
-def get_output_paths(path: str) -> Tuple[ str, str, str]:
+
+def get_output_paths(path: str) -> Tuple[str, str, str]:
     """Gets the output path from the args.path
 
     Args:
@@ -412,11 +427,11 @@ def get_output_paths(path: str) -> Tuple[ str, str, str]:
 
     Returns:
         Tuple[str, str, str]: Gencc dir (args.path if given), output file and final_output_file
-    """    
+    """
     if path:
         timestamp = create_datetime_now()
         gencc_dir = os.path.join(path, timestamp)
-        os.makedirs(gencc_dir, exist_ok=True) # to make the directory
+        os.makedirs(gencc_dir, exist_ok=True)  # to make the directory
 
         output_file = os.path.join(gencc_dir, "G2P_GenCC.txt")
         final_output_file = os.path.join(gencc_dir, "G2P_GenCC.xlsx")
@@ -426,8 +441,11 @@ def get_output_paths(path: str) -> Tuple[ str, str, str]:
         final_output_file = "G2P_GenCC.xlsx"
         return ".", output_file, final_output_file
 
-def handle_new_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any]) -> write_to_the_GenCC_file:
-    """Handles new submission, so new generation of the G2P records and GenCC data 
+
+def handle_new_submission(
+    read_data: list, output_file: str, dry: bool, db_config: dict[str, Any]
+) -> write_to_the_GenCC_file:
+    """Handles new submission, so new generation of the G2P records and GenCC data
 
     Args:
         read_data (list): Data from the G2P all records file
@@ -438,10 +456,17 @@ def handle_new_submission(read_data: list, output_file: str, dry: bool, db_confi
     Returns:
         write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
     """
-    type_of = "create"    
+    type_of = "create"
     return write_to_the_GenCC_file(read_data, output_file, dry, db_config, type_of)
 
-def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any], old_file: str) -> write_to_the_GenCC_file:
+
+def handle_existing_submission(
+    read_data: list,
+    output_file: str,
+    dry: bool,
+    db_config: dict[str, Any],
+    old_file: str,
+) -> write_to_the_GenCC_file:
     """Handles existing submission.
 
     Args:
@@ -453,7 +478,7 @@ def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_
 
     Returns:
         write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
-    """    
+    """
     unsubmitted = get_unsubmitted_record(db_config)
     common = retrieve_unsubmitted_records(read_data, unsubmitted)
 
@@ -466,6 +491,7 @@ def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_
     else:
         type_of = "create"
         return write_to_the_GenCC_file(common, output_file, dry, db_config, type_of)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -486,9 +512,12 @@ def main():
         action="store_true",
         required=False,
         help="New is used to determine if this is a new or clean GenCC submission, so no checks on the submission id or stable id will be done",
-
     )
-    ap.add_argument("--old_file", required=False, help="Old file to compare changes in G2P ids in txt format")
+    ap.add_argument(
+        "--old_file",
+        required=False,
+        help="Old file to compare changes in G2P ids in txt format",
+    )
     args = ap.parse_args()
 
     if args.new and args.old_file:
@@ -506,10 +535,15 @@ def main():
 
     if args.new:
         print("Handling new submission")
-        outfile, gencc_list = handle_new_submission(read_data, output_file, dry_run, db_config)
+        outfile, gencc_list = handle_new_submission(
+            read_data, output_file, dry_run, db_config
+        )
     else:
         print("Handling existing submission")
-        outfile, gencc_list = handle_existing_submission(read_data, output_file, dry_run, db_config, args.old_file)
+        old_file = args.old_file
+        outfile, gencc_list = handle_existing_submission(
+            read_data, output_file, dry_run, db_config, old_file
+        )
 
     print("Converting text file to Excel file")
     convert_txt_to_excel(outfile, final_output_file)
