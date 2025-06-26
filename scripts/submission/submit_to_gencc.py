@@ -239,7 +239,7 @@ def post_gencc_submission(list_of_data: list, data:dict[str, Any]):
 
     login_url = "login/"
 
-    login_info = {"username": data["username"], "password": data["password"]}
+    login_info = {"username": data["username"], "password": data["api_password"]}
 
     response = requests.post(data["api_url"] + login_url, json=login_info)
     if response.status_code == 200:
@@ -326,10 +326,10 @@ def write_to_the_GenCC_file(
                     submission_id, db_date, type_of, g2p_id
                 )
                 gencc_list.append(created_record)
-            if len(issues_with_record) > 0:
-                with open("record_with_issues.txt", mode="w") as textfile:
-                    for issues in issues_with_record:
-                        textfile.write(f"{issues}\n")
+    if len(issues_with_record) > 0:
+        with open("record_with_issues.txt", mode="w") as textfile:
+            for issues in issues_with_record:
+                textfile.write(f"{issues}\n")
     
     return outfile, gencc_list
 
@@ -384,7 +384,7 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
     data["password"] = config["database"]["password"]
     data["api_url"] = config["api"]["api_url"]
     data["username"] = config["api"]["username"]
-    data["password"] = config["api"]["password"]
+    data["api_password"] = config["api"]["password"]
 
     return data
 
