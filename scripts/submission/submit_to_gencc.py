@@ -194,15 +194,20 @@ def compare_data_changes(old_reader: list, later_date_ids: list, new_reader: lis
         if (
             new_row.get("disease mim") != old_row.get("disease id")
             and new_row.get("disease MONDO") != old_row.get("disease id")
-        ):
+        ):  
+            new_row["update"] = 1
             updated_data.append(new_row)
         elif new_row.get("disease name") != old_row.get("disease name"):
+            new_row["update"] = 1
             updated_data.append(new_row)
         elif new_row.get("allelic requirement") != old_row.get("moi_name"):
+            new_row["update"] = 1
             updated_data.append(new_row)
         elif new_row.get("confidence category") != old_row.get("classification_name"):
+            new_row["update"] = 1
             updated_data.append(new_row)
         elif new_row.get("publications") != old_row.get("pmids"):
+            new_row["update"] = 1
             updated_data.append(new_row)
 
     return updated_data
@@ -271,7 +276,7 @@ def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list)-> 
     return updated_data + data
 
 def write_to_the_GenCC_file(
-    data: list, outfile: str, dry: str, db_config: dict[str, Any]
+    data: list, outfile: str, dry: str, db_config: dict[str, Any], type_of: str=None
 ) -> str:
     """Creates the G2P_GenCC.txt and also calls the create the gencc_submission function when dry is False,
     A real run
@@ -319,13 +324,24 @@ def write_to_the_GenCC_file(
 
             line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t{pmids}\t{assertion_criteria_url}\n"
             output_file.write(line_to_output)
+            db_date = create_datetime_now()
             if dry is True:
-                type_of = "create"
-                db_date = create_datetime_now()
-                created_record = create_gencc_submission_record(
-                    submission_id, db_date, type_of, g2p_id
-                )
-                gencc_list.append(created_record)
+                if type_of:
+                    type_of = type_of
+                    created_record = create_gencc_submission_record(
+                        submission_id, db_date, type_of, g2p_id
+                    )
+                    gencc_list.append(created_record)
+                else:
+                    update = record["update"]
+                    if update:
+                        type_of = "update"
+                        created_record = create_gencc_submission_record(submission_id, db_date, type_of, g2p_id)
+                        gencc_list.append(created_record)
+                    else:
+                        type_of = "create"
+                        created_record = create_gencc_submission_record(submission_id, db_date, type_of, g2p_id)
+                        gencc_list.append(created_record)
     if len(issues_with_record) > 0:
         with open("record_with_issues.txt", mode="w") as textfile:
             for issues in issues_with_record:
@@ -421,8 +437,9 @@ def handle_new_submission(read_data: list, output_file: str, dry: bool, db_confi
 
     Returns:
         write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
-    """    
-    return write_to_the_GenCC_file(read_data, output_file, dry, db_config)
+    """
+    type_of = "create"    
+    return write_to_the_GenCC_file(read_data, output_file, dry, db_config, type_of)
 
 def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_config: dict[str, Any], old_file: str) -> write_to_the_GenCC_file:
     """Handles existing submission.
@@ -447,7 +464,8 @@ def handle_existing_submission(read_data: list, output_file: str, dry: bool, db_
         merged_data = add_unsubmitted_ids_and_later_review_date(compared, common)
         return write_to_the_GenCC_file(merged_data, output_file, dry, db_config)
     else:
-        return write_to_the_GenCC_file(common, output_file, dry, db_config)
+        type_of = "create"
+        return write_to_the_GenCC_file(common, output_file, dry, db_config, type_of)
 
 def main():
     ap = argparse.ArgumentParser()
