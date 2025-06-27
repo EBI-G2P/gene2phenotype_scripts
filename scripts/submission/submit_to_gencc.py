@@ -344,7 +344,7 @@ def write_to_the_GenCC_file(
                 created_record = create_gencc_submission_record(
                     submission_id, db_date, type_of, g2p_id
                 )
-    gencc_list.append(created_record)
+                gencc_list.append(created_record)
     if len(issues_with_record) > 0:
         with open("record_with_issues.txt", mode="w") as textfile:
             for issues in issues_with_record:
