@@ -324,8 +324,8 @@ def write_to_the_GenCC_file(
             disease_name = record["disease name"]
             moi_id = allelic_requirement[record["allelic requirement"]]
             moi_name = record["allelic requirement"]
-            submitter_id = "GENCC:000113"
-            submitter_name = "G2P"
+            submitter_id = "GENCC:000112"
+            submitter_name = "TGMI"
             classification_id = confidence_category[record["confidence"]]
             classification_name = record["confidence"]
             dt = datetime.fromisoformat(record["date of last review"])
