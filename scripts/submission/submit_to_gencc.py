@@ -312,7 +312,7 @@ def write_to_the_GenCC_file(
         submission_id_base = "1000112"
         for record in data:
             g2p_id = record["g2p id"]
-            submission_id = submission_id_base + str(g2p_id[3:])
+            submission_id = submission_id_base + str(g2p_id[3:]) if not record.get("submission_id") else record.get("submission_id")
 
             hgnc_id = record["hgnc id"]
             hgnc_symbol = record["gene symbol"]
