@@ -339,7 +339,7 @@ def write_to_the_GenCC_file(
             db_date = create_datetime_now()
             if dry:
                 if not type_of:
-                    type_of = "update" if record.get("update") else "create"
+                    type_of = "update" if record.get("update") == 1 else "create"
 
                 created_record = create_gencc_submission_record(
                     submission_id, db_date, type_of, g2p_id
