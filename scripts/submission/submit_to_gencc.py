@@ -288,7 +288,7 @@ def add_unsubmitted_ids_and_later_review_date(updated_data: list, data: list) ->
 
 
 def write_to_the_GenCC_file(
-    data: list, outfile: str, dry: str, db_config: dict[str, Any], type_of: str = None
+    data: list, outfile: str, dry: str, type_of: str = None
 ) -> str:
     """Creates the G2P_GenCC.txt and also calls the create the gencc_submission function when dry is False,
     A real run
@@ -298,7 +298,7 @@ def write_to_the_GenCC_file(
         data (dict[str, Any]): Record of unsubmitted ids
         outfile (str): Txt file to be created
         dry (str): To allow for a real run, which updates the db
-        db_config (dict[str, Any]): DB/API configuration dictionary
+        type_of(str): It is always set to None.
 
     Returns:
         str: An output file
@@ -311,6 +311,7 @@ def write_to_the_GenCC_file(
         gencc_list = []
         submission_id_base = "1000112"
         for record in data:
+            print(record, "\n")
             g2p_id = record["g2p id"]
             submission_id = submission_id_base + str(g2p_id[3:]) if not record.get("submission_id") else record.get("submission_id")
 
@@ -338,9 +339,9 @@ def write_to_the_GenCC_file(
             output_file.write(line_to_output)
             db_date = create_datetime_now()
             if dry:
+                type_of = None
                 if not type_of:
                     type_of = "update" if record.get("update") == 1 else "create"
-
                 created_record = create_gencc_submission_record(
                     submission_id, db_date, type_of, g2p_id
                 )
@@ -476,10 +477,10 @@ def handle_existing_submission(
         later_review = get_later_review_date(db_config)
         compared = compare_data_changes(old_reader, later_review, read_data, db_config)
         merged_data = add_unsubmitted_ids_and_later_review_date(compared, common)
-        return write_to_the_GenCC_file(merged_data, output_file, dry, db_config)
+        return write_to_the_GenCC_file(merged_data, output_file, dry)
     else:
         type_of = "create"
-        return write_to_the_GenCC_file(common, output_file, dry, db_config, type_of)
+        return write_to_the_GenCC_file(common, output_file, dry, type_of)
 
 
 def main():
