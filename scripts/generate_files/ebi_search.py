@@ -146,7 +146,7 @@ def dump_g2p_records(
     return records
 
 
-def add_elem(parent: object, name: str, value: str) -> None:
+def add_element(parent: object, name: str, value: str) -> None:
     """
     Add a field to the XML obj.
 
@@ -172,43 +172,43 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
     Returns:
         bytes: xml data generated with the G2P records info
     """
-    database_elem = ET.Element("database")
+    database_element = ET.Element("database")
 
     # Add metadata
-    add_elem(database_elem, "name", "G2P")
-    add_elem(
-        database_elem,
+    add_element(database_element, "name", "G2P")
+    add_element(
+        database_element,
         "description",
         "Gene2Phenotype (G2P) is a detailed collection of expert curated gene-disease associations with information on allelic requirement, observed variant classes and disease mechanism",
     )
-    add_elem(database_elem, "url", "https://www.ebi.ac.uk/gene2phenotype/")
-    add_elem(database_elem, "url_search", "https://www.ebi.ac.uk/gene2phenotype/lgd/")
-    add_elem(database_elem, "release", g2p_version)
-    add_elem(database_elem, "entry_count", str(len(g2p_records)))
+    add_element(database_element, "url", "https://www.ebi.ac.uk/gene2phenotype/")
+    add_element(database_element, "url_search", "https://www.ebi.ac.uk/gene2phenotype/lgd/")
+    add_element(database_element, "release", g2p_version)
+    add_element(database_element, "entry_count", str(len(g2p_records)))
 
     # Add records
-    entries_elem = ET.SubElement(database_elem, "entries")
+    entries_element = ET.SubElement(database_element, "entries")
     for entry in g2p_records:
-        entry_elem = ET.SubElement(entries_elem, "entry", id=entry, acc=entry)
+        entry_element = ET.SubElement(entries_element, "entry", id=entry, acc=entry)
         entry_name = (
             f"{g2p_records[entry]['disease']} ({g2p_records[entry]['confidence']})"
         )
-        add_elem(entry_elem, "name", entry_name)
+        add_element(entry_element, "name", entry_name)
         # Additional fields
-        add_fields_elem = ET.SubElement(entry_elem, "additional_fields")
-        f = ET.SubElement(add_fields_elem, "field", name="gene")
+        add_fields_element = ET.SubElement(entry_element, "additional_fields")
+        f = ET.SubElement(add_fields_element, "field", name="gene")
         f.text = g2p_records[entry]["gene"]
-        f = ET.SubElement(add_fields_elem, "field", name="disease")
+        f = ET.SubElement(add_fields_element, "field", name="disease")
         f.text = g2p_records[entry]["disease"]
-        f = ET.SubElement(add_fields_elem, "field", name="genotype")
+        f = ET.SubElement(add_fields_element, "field", name="genotype")
         f.text = g2p_records[entry]["genotype"]
-        f = ET.SubElement(add_fields_elem, "field", name="mechanism")
+        f = ET.SubElement(add_fields_element, "field", name="mechanism")
         f.text = g2p_records[entry]["mechanism"]
-        f = ET.SubElement(add_fields_elem, "field", name="confidence")
+        f = ET.SubElement(add_fields_element, "field", name="confidence")
         f.text = g2p_records[entry]["confidence"]
 
         # Cross references - gene ID
-        xrefs_elem = ET.SubElement(entry_elem, "cross_references")
+        xrefs_elem = ET.SubElement(entry_element, "cross_references")
         # Gene IDs: Ensembl and HGNC
         ET.SubElement(
             xrefs_elem, "ref", dbname="HGNC", dbkey=g2p_records[entry]["hgnc_id"]
@@ -243,7 +243,7 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
                 ET.SubElement(xrefs_elem, "ref", dbname="EUROPEPMC", dbkey=pmid)
 
     return ET.tostring(
-        database_elem, pretty_print=True, encoding="UTF-8", xml_declaration=True
+        database_element, pretty_print=True, encoding="UTF-8", xml_declaration=True
     )
 
 
