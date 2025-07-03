@@ -46,7 +46,7 @@ def get_g2p_version(api_url: str) -> str:
     try:
         response = requests.get(url)
     except Exception as e:
-        print(f"Error while fetching the G2P version:", e)
+        sys.exit(f"Error while fetching the G2P version:", e)
     else:
         if response.status_code == 200:
             result = response.json()
@@ -54,7 +54,7 @@ def get_g2p_version(api_url: str) -> str:
                 if obj["key"] == "g2p_release":
                     g2p_version = obj["version"]
         else:
-            print(f"Failed to fetch G2P version")
+            sys.exit(f"Failed to fetch G2P version from API")
 
     return g2p_version
 
@@ -89,8 +89,7 @@ def dump_g2p_records(
             host=db_host, port=db_port, user=user, passwd=password, db=db_name
         )
     except MySQLdb.Error as error:
-        print("Database connection failed:", error)
-        sys.exit(1)
+        sys.exit("Database connection failed:", error)
     else:
         sql = """ SELECT l.name, li.identifier
                   FROM locus l
@@ -208,13 +207,13 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         f.text = g2p_records[entry]["confidence"]
 
         # Cross references - gene ID
-        xrefs_elem = ET.SubElement(entry_element, "cross_references")
+        xrefs_element = ET.SubElement(entry_element, "cross_references")
         # Gene IDs: Ensembl and HGNC
         ET.SubElement(
-            xrefs_elem, "ref", dbname="HGNC", dbkey=g2p_records[entry]["hgnc_id"]
+            xrefs_element, "ref", dbname="HGNC", dbkey=g2p_records[entry]["hgnc_id"]
         )
         ET.SubElement(
-            xrefs_elem,
+            xrefs_element,
             "ref",
             dbname="ENSEMBL_GENE",
             dbkey=g2p_records[entry]["gene_ensembl"],
@@ -223,14 +222,14 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         # Cross references - disease ontology
         if g2p_records[entry]["disease_mondo"] != "":
             ET.SubElement(
-                xrefs_elem,
+                xrefs_element,
                 "ref",
                 dbname="Mondo",
                 dbkey=g2p_records[entry]["disease_mondo"],
             )
         if g2p_records[entry]["disease_mim"] != "":
             ET.SubElement(
-                xrefs_elem,
+                xrefs_element,
                 "ref",
                 dbname="OMIM_DISEASE",
                 dbkey=g2p_records[entry]["disease_mim"],
@@ -240,7 +239,7 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         if g2p_records[entry]["pmids"] != "":
             publications_list = g2p_records[entry]["pmids"].split("; ")
             for pmid in publications_list:
-                ET.SubElement(xrefs_elem, "ref", dbname="EUROPEPMC", dbkey=pmid)
+                ET.SubElement(xrefs_element, "ref", dbname="EUROPEPMC", dbkey=pmid)
 
     return ET.tostring(
         database_element, pretty_print=True, encoding="UTF-8", xml_declaration=True
@@ -263,6 +262,9 @@ def main():
 
     config_file = args.config
     output_dir = args.output_dir
+
+    if not os.path.exists(output_dir):
+        sys.exit(f"Invalid output directory '{output_dir}'")
 
     # Load the config file
     config = configparser.ConfigParser()
