@@ -307,22 +307,6 @@ def update_diseases(
                                 "new_disease_id": error["existing_id"],
                             }
                         )
-                    response_update_lgd = requests.post(
-                        api_url + lgd_disease_url,
-                        json=lgd_disease_to_update,
-                        cookies=response.cookies,
-                    )
-                    if response_update_lgd.status_code == 200:
-                        print(
-                            "LGD records updated successfully:",
-                            response_update_lgd.json(),
-                        )
-                    else:
-                        print(
-                            "Failed to update LGD records:",
-                            response_update_lgd.status_code,
-                            response_update_lgd.json(),
-                        )
             else:
                 print(
                     "Failed to update diseases:",
@@ -330,7 +314,29 @@ def update_diseases(
                     response_update.json(),
                 )
         except Exception as e:
-            print("Error:", e)
+            print("Error while updating diseases:", e)
+
+        if lgd_disease_to_update:
+            try:
+                response_update_lgd = requests.post(
+                            api_url + lgd_disease_url,
+                            json=lgd_disease_to_update,
+                            cookies=response.cookies,
+                        )
+                if response_update_lgd.status_code == 200:
+                    print(
+                        "LGD records updated successfully:",
+                        response_update_lgd.json(),
+                    )
+                else:
+                    print(
+                        "Failed to update LGD records:",
+                        response_update_lgd.status_code,
+                        response_update_lgd.json(),
+                    )
+            except Exception as e:
+                print("Error while updating LGD diseases:", e)
+
     else:
         print("Error: cannot login into G2P")
 
