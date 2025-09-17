@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import csv
-import os.path
 import sys
 import argparse
 import requests
@@ -109,10 +108,14 @@ def process_records(records: List[Dict[str, str]], api_url: str, cookies: reques
             genotype = line["genotype"].strip()
             mechanism = line["mechanism"].strip()
 
+            if not g2p_id_to_keep.startswith("G2P"):
+                wr.write(f"Invalid G2P ID\t{g2p_id_to_keep}\t{line['g2p ids to merge']}\n")
+                continue
+
             try:
                 lgd_response = requests.get(lgd_url+g2p_id_to_keep, cookies=cookies)
             except Exception as e:
-                print(f"Error while fetching record {g2p_id_to_keep}:", e)
+                print(f"Error while fetching record {g2p_id_to_keep}:", str(e))
             else:
                 if lgd_response.status_code == 200:
                     response_json = lgd_response.json()
@@ -132,10 +135,7 @@ def process_records(records: List[Dict[str, str]], api_url: str, cookies: reques
                         })
                         wr_merge.write(f"Merge {line['g2p ids to merge']} into {g2p_id_to_keep}\n")
                 else:
-                    print(
-                        f"Failed fetching record. Status code: {lgd_response.status_code}. Message:",
-                        lgd_response.json(),
-                    )
+                    print(f"Failed fetching record {g2p_id_to_keep}. Status code: {lgd_response.status_code}")
 
     return records_to_merge
 
