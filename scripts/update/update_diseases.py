@@ -159,9 +159,9 @@ def read_file(
         for line in fh:
             if not line.startswith("g2p id"):
                 data = line.strip().split("\t")
-                g2p_id = data[0]
-                gene_symbol = data[1]
-                current_disease = data[2].replace('"', "")
+                g2p_id = data[0].strip()
+                gene_symbol = data[1].strip()
+                current_disease = data[2].strip().replace('"', "")
                 new_disease = data[3].strip().replace('"', "")
 
                 # Check if column "Updated" is defined in the file
@@ -387,6 +387,7 @@ def main():
             "gene symbol",
             "disease name",
             "disease name formatted",
+            "allelic requirement", # NEW
         ]
 
         with open(file, "r", encoding="utf-8") as fh:
