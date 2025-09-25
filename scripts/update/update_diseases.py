@@ -337,7 +337,9 @@ def add_disease(
     disease_data = {"name": disease_name}
 
     try:
-        response_add = requests.post(add_disease_url, json=disease_data, cookies=cookies)
+        response_add = requests.post(
+            add_disease_url, json=disease_data, cookies=cookies
+        )
         if response_add.status_code == 201:
             response_json = response_add.json()
             disease_id = response_json["id"]
@@ -371,7 +373,9 @@ def update_diseases(
     lgd_disease_url = f"{api_url.rstrip('/')}/lgd_disease_updates/"
 
     try:
-        response_update = requests.post(disease_url, json=diseases_to_update, cookies=cookies)
+        response_update = requests.post(
+            disease_url, json=diseases_to_update, cookies=cookies
+        )
         if response_update.status_code == 200:
             response_json = response_update.json()
             print("Diseases updated successfully:", response_json)
@@ -399,7 +403,9 @@ def update_diseases(
 
     if lgd_disease_to_update:
         try:
-            response_update_lgd = requests.post(lgd_disease_url,json=lgd_disease_to_update,cookies=cookies)
+            response_update_lgd = requests.post(
+                lgd_disease_url, json=lgd_disease_to_update, cookies=cookies
+            )
             if response_update_lgd.status_code == 200:
                 print(
                     "LGD records updated successfully:",
