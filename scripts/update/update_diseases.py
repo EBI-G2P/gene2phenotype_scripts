@@ -27,7 +27,7 @@ import configparser
 
             --file : Tab delimited file with all diseases to be updated (mandatory)
                 File format is the following:
-                    g2p id\tgene symbol\tdisease name\tdisease name formatted\tallelic requirement\tUpdated
+                    g2p id\tgene symbol\tdisease name\tdisease name formatted\tallelic requirement\tupdated
 
             --api_username: Username to connect to the G2P API (mandatory)
             --api_password: Password to connect to the G2P API (mandatory)
@@ -44,7 +44,7 @@ unique_diseases_from_input = set()
 
 def dump_data(
     db_host: str, db_port: int, db_name: str, user: str, password: str
-) -> tuple[dict[str, list], dict[str, dict]]:
+) -> dict[str, list]:
     """
     Dumps the current data from the G2P database.
 
@@ -160,7 +160,7 @@ def read_file(
         )
 
         # Header:
-        # g2p id, gene symbol, disease name, disease name formatted, allelic requirement, Updated
+        # g2p id, gene symbol, disease name, disease name formatted, allelic requirement, updated
         # Other columns are ignored
         for line in fh:
             if not line.startswith("g2p id"):
@@ -171,7 +171,7 @@ def read_file(
                 new_disease = data[3].strip().replace('"', "")
                 genotype = data[4].strip()
 
-                # Check if column "Updated" is defined in the file
+                # Check if column "updated" is defined in the file
                 # If not, set value to the default "No"
                 is_updated = data[5] if len(data) > 5 else "No"
 
@@ -330,16 +330,14 @@ def add_disease(
         - add/disease/
     It returns the disease id just that was just created.
     """
-    add_disease_url = "add/disease/"
+    add_disease_url = f"{api_url.rstrip('/')}/add/disease/"
     disease_id = None
 
     # Prepare disease input data
     disease_data = {"name": disease_name}
 
     try:
-        response_add = requests.post(
-            api_url + add_disease_url, json=disease_data, cookies=cookies
-        )
+        response_add = requests.post(add_disease_url, json=disease_data, cookies=cookies)
         if response_add.status_code == 201:
             response_json = response_add.json()
             disease_id = response_json["id"]
@@ -362,20 +360,18 @@ def update_diseases(
     """
     Method to update the disease names.
     This method calls the following gene2phenotype API endpoints:
-    update/diseases/ to update the disease name (simple update)
-    lgd_disease_updates/ to update the LGD record with the new disease id - it replaces the
+        - update/diseases/ to update the disease name (simple update)
+        - lgd_disease_updates/ to update the LGD record with the new disease id - it replaces the
     previous disease id with the new id
 
     Args:
         diseases_to_update (list): list of diseases to update
     """
-    disease_url = "update/diseases/"
-    lgd_disease_url = "lgd_disease_updates/"
+    disease_url = f"{api_url.rstrip('/')}/update/diseases/"
+    lgd_disease_url = f"{api_url.rstrip('/')}/lgd_disease_updates/"
 
     try:
-        response_update = requests.post(
-            api_url + disease_url, json=diseases_to_update, cookies=cookies
-        )
+        response_update = requests.post(disease_url, json=diseases_to_update, cookies=cookies)
         if response_update.status_code == 200:
             response_json = response_update.json()
             print("Diseases updated successfully:", response_json)
@@ -403,11 +399,7 @@ def update_diseases(
 
     if lgd_disease_to_update:
         try:
-            response_update_lgd = requests.post(
-                api_url + lgd_disease_url,
-                json=lgd_disease_to_update,
-                cookies=cookies,
-            )
+            response_update_lgd = requests.post(lgd_disease_url,json=lgd_disease_to_update,cookies=cookies)
             if response_update_lgd.status_code == 200:
                 print(
                     "LGD records updated successfully:",
