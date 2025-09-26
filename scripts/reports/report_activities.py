@@ -2,12 +2,11 @@
 
 import sys
 import argparse
-import configparser
-import csv
-from datetime import datetime, timedelta, date
-import MySQLdb
+from datetime import datetime, timedelta
 import os.path
 import requests
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 
 """
@@ -204,84 +203,100 @@ def generate_report(
         cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
     """
     current_date = datetime.now().date()
-    full_report_file = os.path.join(output_dir, "all_updates_" + str(current_date) + ".txt")
-    minimal_report_file = os.path.join(output_dir, "updates_" + str(current_date) + ".txt")
+    full_report_file = os.path.join(output_dir, "report_all_updates_" + str(current_date) + ".pdf")
+    minimal_report_file = os.path.join(output_dir, "report_updates_" + str(current_date) + ".pdf")
 
-    with open(full_report_file, "w") as wr, open(minimal_report_file, "w") as wr_minimal:
-        wr.write(f"Data updates from {seven_days_ago} to {current_date}\n")
-        wr_minimal.write(f"Data updates from {seven_days_ago} to {current_date}\n\n")
-        for g2p_id, list_logs in activity_logs_by_record.items():
-            wr.write(f"\n### {g2p_id} ###\n")
-            # Get all the activity logs for the record
-            record_activity_logs = get_record_activity_logs(api_url, g2p_id, cookies)
+    # Create the PDF with all the data updates - full report
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", style="B", size=16)
+    pdf.multi_cell(0, 7, f"Data updates from {seven_days_ago} to {current_date}\n")
+    pdf.set_font("helvetica", size=12)
 
-            for log in list_logs:
-                report_row = None
+    # Create the PDF with minimal data updates
+    pdf_minimal = FPDF()
+    pdf_minimal.add_page()
+    pdf_minimal.set_font("helvetica", style="B", size=16)
+    pdf_minimal.multi_cell(0, 7, f"Data updates from {seven_days_ago} to {current_date}\n")
+    pdf_minimal.set_font("helvetica", size=12)
 
-                # Records logs
-                if log["data_type"] == "record":
-                    if log["change_type"] == "updated":
-                        if log["is_deleted"] == 1:
-                            report_row = f"On {log['date']} {log['user']} deleted record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
-                            # Print to the minimal report
-                            wr_minimal.write(report_row)
-                        else:
-                            # Get the current record data and compare with log
-                            record_updates = get_record_update(
-                                record_activity_logs, log["date"]
-                            )
-                            if record_updates != "":
-                                report_row = f"On {log['date']} {log['user']} updated record {log['g2p_id']}:{record_updates}\n"
-                                # Print to the minimal report
-                                wr_minimal.write(report_row)
-                    else:
-                        report_row = f"On {log['date']} {log['user']} {log['change_type']} record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
+    for g2p_id, list_logs in activity_logs_by_record.items():
+        pdf.set_text_color(0, 0, 255)
+        pdf.multi_cell(0, 5, f"\n### {g2p_id} ###\n", new_x=XPos.LMARGIN, new_y=YPos.NEXT, link="https://www.ebi.ac.uk/gene2phenotype/lgd/"+g2p_id)
+        pdf.set_text_color(0, 0, 0)
+        # Get all the activity logs for the record
+        record_activity_logs = get_record_activity_logs(api_url, g2p_id, cookies)
+
+        for log in list_logs:
+            report_row = None
+
+            # Records logs
+            if log["data_type"] == "record":
+                if log["change_type"] == "updated":
+                    if log["is_deleted"] == 1:
+                        report_row = f"On {log['date']} {log['user']} deleted record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
                         # Print to the minimal report
-                        wr_minimal.write(report_row)
-                # Data linked to the record logs
-                else:
-                    if (
-                        log["change_type"] == "updated"
-                        and "is_deleted" in log
-                        and log["is_deleted"] == 1
-                    ):
-                        report_row = f"On {log['date']} {log['user']} deleted a {log['data_type']} for record {log['g2p_id']}\n"
-                    elif log["change_type"] == "created":
-                        report_row = f"On {log['date']} {log['user']} created {log['data_type']}: "
-                        if log["data_type"] == "panel":
-                            report_row += f"{log['panel_name']}\n"
-                            # Print to the minimal report
-                            wr_minimal.write(f"On {log['date']} {log['user']} created {log['data_type']}: {log['panel_name']} for record {log['g2p_id']}\n")
-                        if log["data_type"] == "publication":
-                            report_row += f"PMID {log['publication_pmid']}\n"
-                        if log["data_type"] == "phenotype":
-                            report_row += f"{log['phenotype']} for PMID {log['publication_pmid']}\n"
-                        if log["data_type"] == "phenotype_summary":
-                            report_row += f"'{log['summary']}'\n"
-                        if log["data_type"] == "variant_consequence":
-                            report_row += f"'{log['variant_consequence']}'\n"
-                        if log["data_type"] == "variant_type":
-                            report_row += f"'{log['variant_type']}' for PMID {log['publication_pmid']}\n"
-                        if log["data_type"] == "record_comment":
-                            is_public = (
-                                "public comment"
-                                if log["is_public"]
-                                else "private comment"
-                            )
-                            report_row += f"{is_public}\n"
-                        if log["data_type"] == "mechanism_synopsis":
-                            report_row += (
-                                f"'{log['synopsis']}' with support '{log['support']}'\n"
-                            )
-                        if log["data_type"] == "mechanism_evidence":
-                            report_row += f"evidence type '{log['evidence_type']}', evidence value '{log['evidence']}' for PMID {log['publication_pmid']}\n"
-                        if log["data_type"] == "cross_cutting_modifier":
-                            report_row += f"'{log['ccm']}'\n"
+                        pdf_minimal.multi_cell(0, 5, report_row)
                     else:
-                        report_row = f"On {log['date']} {log['user']} {log['change_type']} a {log['data_type']} for record {log['g2p_id']}\n"
+                        # Get the current record data and compare with log
+                        record_updates = get_record_update(
+                            record_activity_logs, log["date"]
+                        )
+                        if record_updates != "":
+                            report_row = f"On {log['date']} {log['user']} updated record {log['g2p_id']}:{record_updates}\n"
+                            # Print to the minimal report
+                            pdf_minimal.multi_cell(0, 5, report_row)
+                else:
+                    report_row = f"On {log['date']} {log['user']} {log['change_type']} record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
+                    # Print to the minimal report
+                    pdf_minimal.multi_cell(0, 5, report_row)
+            # Data linked to the record logs
+            else:
+                if (
+                    log["change_type"] == "updated"
+                    and "is_deleted" in log
+                    and log["is_deleted"] == 1
+                ):
+                    report_row = f"On {log['date']} {log['user']} deleted a {log['data_type']} for record {log['g2p_id']}\n"
+                elif log["change_type"] == "created":
+                    report_row = f"On {log['date']} {log['user']} created {log['data_type']}: "
+                    if log["data_type"] == "panel":
+                        report_row += f"{log['panel_name']}\n"
+                        # Print to the minimal report
+                        pdf_minimal.multi_cell(0, 5, f"On {log['date']} {log['user']} created {log['data_type']}: {log['panel_name']} for record {log['g2p_id']}\n")
+                    if log["data_type"] == "publication":
+                        report_row += f"PMID {log['publication_pmid']}\n"
+                    if log["data_type"] == "phenotype":
+                        report_row += f"{log['phenotype']} for PMID {log['publication_pmid']}\n"
+                    if log["data_type"] == "phenotype_summary":
+                        report_row += f"'{log['summary']}'\n"
+                    if log["data_type"] == "variant_consequence":
+                        report_row += f"'{log['variant_consequence']}'\n"
+                    if log["data_type"] == "variant_type":
+                        report_row += f"'{log['variant_type']}' for PMID {log['publication_pmid']}\n"
+                    if log["data_type"] == "record_comment":
+                        is_public = (
+                            "public comment"
+                            if log["is_public"]
+                            else "private comment"
+                        )
+                        report_row += f"{is_public}\n"
+                    if log["data_type"] == "mechanism_synopsis":
+                        report_row += (
+                            f"'{log['synopsis']}' with support '{log['support']}'\n"
+                        )
+                    if log["data_type"] == "mechanism_evidence":
+                        report_row += f"evidence type '{log['evidence_type']}', evidence value '{log['evidence']}' for PMID {log['publication_pmid']}\n"
+                    if log["data_type"] == "cross_cutting_modifier":
+                        report_row += f"'{log['ccm']}'\n"
+                else:
+                    report_row = f"On {log['date']} {log['user']} {log['change_type']} a {log['data_type']} for record {log['g2p_id']}\n"
 
-                if report_row:
-                    wr.write(report_row)
+            if report_row:
+                pdf.multi_cell(0, 5, report_row)
+
+    pdf.output(full_report_file)
+    pdf_minimal.output(minimal_report_file)
 
 
 def main():
