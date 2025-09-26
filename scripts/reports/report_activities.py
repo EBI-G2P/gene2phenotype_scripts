@@ -4,14 +4,14 @@ import sys
 import argparse
 import configparser
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import MySQLdb
 import os.path
 import requests
 
 
 """
-    Description: Script to generate a report of changed data in G2P
+    Description: Script to generate a report of data updates from the last 7 days
 
     Params:
             --api-url      : G2P API URL (mandatory)
@@ -48,13 +48,15 @@ def logout(api_url: str, cookies: requests.cookies.RequestsCookieJar) -> None:
 
 
 def get_activity_logs(
-    api_url: str, cookies: requests.cookies.RequestsCookieJar
+    api_url: str, seven_days_ago: datetime, cookies: requests.cookies.RequestsCookieJar
 ) -> list:
     """
     Fetch the activity logs of the last 7 days.
 
     Args:
         api_url (str): G2P API URL
+        seven_days_ago (datetime): date from 7 days ago
+        cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
 
     Returns:
         list: list of logs
@@ -62,8 +64,6 @@ def get_activity_logs(
     url = f"{api_url.rstrip('/')}/activity_logs/?date_cutoff="
     activity_list = []
 
-    # Get the date from the last week
-    seven_days_ago = datetime.now().date() - timedelta(days=7)
     url_last_week = url + str(seven_days_ago)
 
     while url_last_week:
@@ -85,43 +85,93 @@ def get_activity_logs(
 
 
 def get_record_activity_logs(
-    api_url: str, stable_id:str, cookies: requests.cookies.RequestsCookieJar
+    api_url: str, stable_id: str, cookies: requests.cookies.RequestsCookieJar
 ) -> list:
     """
     Fetch the activity logs for the specific record.
 
     Args:
         api_url (str): G2P API URL
+        stable_id (str): G2P stable ID of the record
+        cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
 
     Returns:
         list: list of logs
     """
-    url = f"{api_url.rstrip('/')}/activity_logs/?stable_id="
+    url_record_activity = f"{api_url.rstrip('/')}/activity_logs/?stable_id={stable_id}"
     activity_list = []
 
-    # Get the date from the last week
-    seven_days_ago = datetime.now().date() - timedelta(days=7)
-    url_last_week = url + str(seven_days_ago)
-
-    while url_last_week:
+    while url_record_activity:
         try:
-            response = requests.get(url_last_week, cookies=cookies)
+            response = requests.get(url_record_activity, cookies=cookies)
         except Exception as e:
             sys.exit("Error while fetching activity logs:", str(e))
         else:
             if response.status_code == 200:
                 result = response.json()
-                activity_list += result["results"]
-                url_last_week = result["next"]
+                for log in result["results"]:
+                    # We are only interested in the log type "record"
+                    if log["data_type"] == "record":
+                        activity_list.append(log)
+                url_record_activity = result["next"]
             else:
                 sys.exit(
-                    f"Failed to fetch activity logs from API. Status code: {response.status_code}"
+                    f"Failed to fetch activity logs from API for record {stable_id}. Status code: {response.status_code}"
                 )
 
     return activity_list
 
 
+def get_record_update(activity_list: list, log_date: str):
+    """
+    Get the specific data update from the record activity logs.
+
+    Args:
+        activity_list (list): list of activity logs
+        log_date (str): date of the activity log
+
+    Returns:
+        str: specific update done on the date defined in log_date
+    """
+    update = ""
+
+    for idx, log in enumerate(activity_list):
+        if log["date"] == log_date:
+            current_data = log
+            # Check if there is a previous activity log
+            if idx + 1 < len(activity_list):
+                previous_data = activity_list[idx + 1]
+
+                # Check what is different
+                if current_data["confidence"] != previous_data["confidence"]:
+                    update += f" from confidence '{previous_data['confidence']}' to '{current_data['confidence']}';"
+                if current_data["mechanism"] != previous_data["mechanism"]:
+                    update += f" from mechanism '{previous_data['mechanism']}' to '{current_data['mechanism']}';"
+                if (
+                    current_data["mechanism_support"]
+                    != previous_data["mechanism_support"]
+                ):
+                    update += f" from mechanism support '{previous_data['mechanism_support']}' to '{current_data['mechanism_support']}';"
+                if current_data["disease"] != previous_data["disease"]:
+                    update += f" from disease '{previous_data['disease']}' to '{current_data['disease']}';"
+                if current_data["is_reviewed"] != previous_data["is_reviewed"]:
+                    update += f" from is_reviewed '{previous_data['is_reviewed']}' to '{current_data['is_reviewed']}';"
+                if current_data["is_deleted"] != previous_data["is_deleted"]:
+                    update += f" from is_deleted '{previous_data['is_deleted']}' to '{current_data['is_deleted']}';"
+
+    return update
+
+
 def format_activity_logs(activity_logs: list) -> dict:
+    """
+    Returns the activity logs by the G2P stable ID.
+
+    Args:
+        activity_list (list): list of activity logs
+
+    Returns:
+        dict: key is the stable ID and the value is the list of activity logs
+    """
     activity_by_record = {}
 
     for log in activity_logs:
@@ -136,14 +186,34 @@ def format_activity_logs(activity_logs: list) -> dict:
     return activity_by_record
 
 
-def generate_report(output_dir: str, activity_logs_by_record: list):
-    current_date = datetime.now().date()
-    report_file = "updates_" + str(current_date) + ".txt"
+def generate_report(
+    output_dir: str,
+    activity_logs_by_record: list,
+    seven_days_ago: datetime,
+    api_url: str,
+    cookies: requests.cookies.RequestsCookieJar,
+) -> None:
+    """
+    Generate the final reports of all the data updates done in the last 7 days.
 
-    with (open(report_file, "w") as wr):
-        wr.write("Updates from last 7 days\n")
+    Args:
+        output_dir (str): directory where the reports are going to be saved
+        activity_logs_by_record (dict): list of activity logs for each G2P stable ID
+        seven_days_ago (datetime): date
+        api_url (str): G2P API URL
+        cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
+    """
+    current_date = datetime.now().date()
+    full_report_file = os.path.join(output_dir, "all_updates_" + str(current_date) + ".txt")
+    minimal_report_file = os.path.join(output_dir, "updates_" + str(current_date) + ".txt")
+
+    with open(full_report_file, "w") as wr, open(minimal_report_file, "w") as wr_minimal:
+        wr.write(f"Data updates from {seven_days_ago} to {current_date}\n")
+        wr_minimal.write(f"Data updates from {seven_days_ago} to {current_date}\n\n")
         for g2p_id, list_logs in activity_logs_by_record.items():
             wr.write(f"\n### {g2p_id} ###\n")
+            # Get all the activity logs for the record
+            record_activity_logs = get_record_activity_logs(api_url, g2p_id, cookies)
 
             for log in list_logs:
                 report_row = None
@@ -153,21 +223,65 @@ def generate_report(output_dir: str, activity_logs_by_record: list):
                     if log["change_type"] == "updated":
                         if log["is_deleted"] == 1:
                             report_row = f"On {log['date']} {log['user']} deleted record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
+                            # Print to the minimal report
+                            wr_minimal.write(report_row)
                         else:
-                            # TODO: check what actually was updated
                             # Get the current record data and compare with log
-                            report_row = f"(2) On {log['date']} {log['user']} updated record {log['g2p_id']}\n"
+                            record_updates = get_record_update(
+                                record_activity_logs, log["date"]
+                            )
+                            if record_updates != "":
+                                report_row = f"On {log['date']} {log['user']} updated record {log['g2p_id']}:{record_updates}\n"
+                                # Print to the minimal report
+                                wr_minimal.write(report_row)
                     else:
                         report_row = f"On {log['date']} {log['user']} {log['change_type']} record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
+                        # Print to the minimal report
+                        wr_minimal.write(report_row)
                 # Data linked to the record logs
                 else:
-                    if log["change_type"] == "updated" and "is_deleted" in log and log["is_deleted"] == 1:
-                        # TODO: print more details
+                    if (
+                        log["change_type"] == "updated"
+                        and "is_deleted" in log
+                        and log["is_deleted"] == 1
+                    ):
                         report_row = f"On {log['date']} {log['user']} deleted a {log['data_type']} for record {log['g2p_id']}\n"
+                    elif log["change_type"] == "created":
+                        report_row = f"On {log['date']} {log['user']} created {log['data_type']}: "
+                        if log["data_type"] == "panel":
+                            report_row += f"{log['panel_name']}\n"
+                            # Print to the minimal report
+                            wr_minimal.write(f"On {log['date']} {log['user']} created {log['data_type']}: {log['panel_name']} for record {log['g2p_id']}\n")
+                        if log["data_type"] == "publication":
+                            report_row += f"PMID {log['publication_pmid']}\n"
+                        if log["data_type"] == "phenotype":
+                            report_row += f"{log['phenotype']} for PMID {log['publication_pmid']}\n"
+                        if log["data_type"] == "phenotype_summary":
+                            report_row += f"'{log['summary']}'\n"
+                        if log["data_type"] == "variant_consequence":
+                            report_row += f"'{log['variant_consequence']}'\n"
+                        if log["data_type"] == "variant_type":
+                            report_row += f"'{log['variant_type']}' for PMID {log['publication_pmid']}\n"
+                        if log["data_type"] == "record_comment":
+                            is_public = (
+                                "public comment"
+                                if log["is_public"]
+                                else "private comment"
+                            )
+                            report_row += f"{is_public}\n"
+                        if log["data_type"] == "mechanism_synopsis":
+                            report_row += (
+                                f"'{log['synopsis']}' with support '{log['support']}'\n"
+                            )
+                        if log["data_type"] == "mechanism_evidence":
+                            report_row += f"evidence type '{log['evidence_type']}', evidence value '{log['evidence']}' for PMID {log['publication_pmid']}\n"
+                        if log["data_type"] == "cross_cutting_modifier":
+                            report_row += f"'{log['ccm']}'\n"
                     else:
                         report_row = f"On {log['date']} {log['user']} {log['change_type']} a {log['data_type']} for record {log['g2p_id']}\n"
 
-                wr.write(report_row)
+                if report_row:
+                    wr.write(report_row)
 
 
 def main():
@@ -194,14 +308,19 @@ def main():
     if not os.path.exists(output_dir):
         sys.exit(f"Invalid output directory '{output_dir}'")
 
+    # Get the date from the last week
+    seven_days_ago = datetime.now().date() - timedelta(days=7)
+
     print("Logging in...")
     cookies = login(api_username, api_password, api_url)
 
-    activity_logs = get_activity_logs(api_url, cookies)
+    activity_logs = get_activity_logs(api_url, seven_days_ago, cookies)
 
     activity_logs_by_record = format_activity_logs(activity_logs)
 
-    generate_report(output_dir, activity_logs_by_record)
+    generate_report(
+        output_dir, activity_logs_by_record, seven_days_ago, api_url, cookies
+    )
 
     print("Logging out...")
     logout(api_url, cookies)
