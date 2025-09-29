@@ -10,7 +10,10 @@ from fpdf.enums import XPos, YPos
 
 
 """
-    Description: Script to generate a report of data updates from the last 7 days
+    Description: Script to generate a report of data updates from the last 7 days.
+                 It writes two report files:
+                    - report_all_updates_YYYY-MM-DD.pdf
+                    - report_updates_YYYY-MM-DD.pdf
 
     Params:
             --api-url      : G2P API URL (mandatory)
@@ -121,7 +124,7 @@ def get_record_activity_logs(
     return activity_list
 
 
-def get_record_update(activity_list: list, log_date: str):
+def get_record_update(activity_list: list, log_date: str) -> list:
     """
     Get the specific data update from the record activity logs.
 
@@ -213,7 +216,7 @@ def generate_report(
     pdf.multi_cell(0, 7, f"Data updates from {seven_days_ago} to {current_date}\n")
     pdf.set_font("helvetica", size=12)
 
-    # Create the PDF with minimal data updates
+    # Create the PDF with only the record data updates - minimal report
     pdf_minimal = FPDF()
     pdf_minimal.add_page()
     pdf_minimal.set_font("helvetica", style="B", size=16)
@@ -226,9 +229,11 @@ def generate_report(
         pdf.set_text_color(0, 0, 0)
         # Get all the activity logs for the record
         record_activity_logs = get_record_activity_logs(api_url, g2p_id, cookies)
+        list_report_minimal = []
 
         for log in list_logs:
             report_row = None
+            report_minimal_row = None
 
             # Records logs
             if log["data_type"] == "record":
@@ -236,7 +241,8 @@ def generate_report(
                     if log["is_deleted"] == 1:
                         report_row = f"On {log['date']} {log['user']} deleted record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
                         # Print to the minimal report
-                        pdf_minimal.multi_cell(0, 5, report_row)
+                        # pdf_minimal.multi_cell(0, 5, report_row)
+                        report_minimal_row = report_row
                     else:
                         # Get the current record data and compare with log
                         record_updates = get_record_update(
@@ -245,11 +251,13 @@ def generate_report(
                         if record_updates != "":
                             report_row = f"On {log['date']} {log['user']} updated record {log['g2p_id']}:{record_updates}\n"
                             # Print to the minimal report
-                            pdf_minimal.multi_cell(0, 5, report_row)
+                            # pdf_minimal.multi_cell(0, 5, report_row)
+                            report_minimal_row = report_row
                 else:
                     report_row = f"On {log['date']} {log['user']} {log['change_type']} record {log['g2p_id']}: {log['disease']}; {log['genotype']}; {log['mechanism']}; {log['confidence']}\n"
                     # Print to the minimal report
-                    pdf_minimal.multi_cell(0, 5, report_row)
+                    # pdf_minimal.multi_cell(0, 5, report_row)
+                    report_minimal_row = report_row
             # Data linked to the record logs
             else:
                 if (
@@ -263,7 +271,8 @@ def generate_report(
                     if log["data_type"] == "panel":
                         report_row += f"{log['panel_name']}\n"
                         # Print to the minimal report
-                        pdf_minimal.multi_cell(0, 5, f"On {log['date']} {log['user']} created {log['data_type']}: {log['panel_name']} for record {log['g2p_id']}\n")
+                        report_minimal_row = f"On {log['date']} {log['user']} created {log['data_type']}: {log['panel_name']} for record {log['g2p_id']}\n"
+                        # pdf_minimal.multi_cell(0, 5, f"On {log['date']} {log['user']} created {log['data_type']}: {log['panel_name']} for record {log['g2p_id']}\n")
                     if log["data_type"] == "publication":
                         report_row += f"PMID {log['publication_pmid']}\n"
                     if log["data_type"] == "phenotype":
@@ -292,8 +301,21 @@ def generate_report(
                 else:
                     report_row = f"On {log['date']} {log['user']} {log['change_type']} a {log['data_type']} for record {log['g2p_id']}\n"
 
+            # Write to the full report
             if report_row:
                 pdf.multi_cell(0, 5, report_row)
+            
+            # Save which rows are going to be reported in the minimal report
+            if report_minimal_row:
+                list_report_minimal.append(report_minimal_row)
+
+        # For each G2P ID write to the minimal report
+        if list_report_minimal:
+            pdf_minimal.set_text_color(0, 0, 255)
+            pdf_minimal.multi_cell(0, 5, f"\n### {g2p_id} ###\n", new_x=XPos.LMARGIN, new_y=YPos.NEXT, link="https://www.ebi.ac.uk/gene2phenotype/lgd/"+g2p_id)
+            pdf_minimal.set_text_color(0, 0, 0)
+            for row in list_report_minimal:
+                pdf_minimal.multi_cell(0, 5, row)
 
     pdf.output(full_report_file)
     pdf_minimal.output(minimal_report_file)
@@ -329,13 +351,16 @@ def main():
     print("Logging in...")
     cookies = login(api_username, api_password, api_url)
 
+    print("Getting the activity logs from the API...")
     activity_logs = get_activity_logs(api_url, seven_days_ago, cookies)
-
     activity_logs_by_record = format_activity_logs(activity_logs)
+    print("Getting the activity logs from the API... done")
 
+    print("Generating reports...")
     generate_report(
         output_dir, activity_logs_by_record, seven_days_ago, api_url, cookies
     )
+    print("Generating reports... done")
 
     print("Logging out...")
     logout(api_url, cookies)
