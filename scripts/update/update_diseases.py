@@ -27,7 +27,7 @@ import configparser
 
             --file : Tab delimited file with all diseases to be updated (mandatory)
                 File format is the following:
-                    g2p id\tgene symbol\tdisease name\tdisease name formatted\tallelic requirement\tupdated
+                    g2p id\tgene symbol\tdisease name\tdisease name formatted\tallelic requirement\tadd synonym\tupdated
 
             --api_username: Username to connect to the G2P API (mandatory)
             --api_password: Password to connect to the G2P API (mandatory)
@@ -160,7 +160,7 @@ def read_file(
         )
 
         # Header:
-        # g2p id, gene symbol, disease name, disease name formatted, allelic requirement, updated
+        # g2p id, gene symbol, disease name, disease name formatted, allelic requirement, add synonym, updated
         # Other columns are ignored
         for line in fh:
             if not line.startswith("g2p id"):
@@ -170,12 +170,13 @@ def read_file(
                 current_disease = data[2].strip().replace('"', "")
                 new_disease = data[3].strip().replace('"', "")
                 genotype = data[4].strip()
+                add_synonym = data[5].strip()
 
                 # Check if column "updated" is defined in the file
-                # If not, set value to the default "No"
-                is_updated = data[5] if len(data) > 5 else "No"
+                # If not, set value to the default "no"
+                is_updated = data[6] if len(data) > 6 else "no"
 
-                if is_updated == "Yes":
+                if is_updated == "yes":
                     continue
 
                 # Check if the record can be found in G2P
@@ -310,9 +311,14 @@ def read_file(
 
                         # Add disease to list of diseases to update
                         if to_update:
-                            diseases_to_update.append(
-                                {"id": db_data["disease_id"], "name": new_disease}
-                            )
+                            if add_synonym == "yes":
+                                diseases_to_update.append(
+                                    {"id": db_data["disease_id"], "name": new_disease, "add_synonym": True}
+                                )
+                            else:
+                                diseases_to_update.append(
+                                    {"id": db_data["disease_id"], "name": new_disease}
+                                )
                             if dryrun:
                                 print(
                                     f"Update disease name -> disease_id: {db_data['disease_id']}; current name: {current_disease}; new name: {new_disease}"
@@ -372,34 +378,35 @@ def update_diseases(
     disease_url = f"{api_url.rstrip('/')}/update/diseases/"
     lgd_disease_url = f"{api_url.rstrip('/')}/lgd_disease_updates/"
 
-    try:
-        response_update = requests.post(
-            disease_url, json=diseases_to_update, cookies=cookies
-        )
-        if response_update.status_code == 200:
-            response_json = response_update.json()
-            print("Diseases updated successfully:", response_json)
-            # Some diseases were probably not updated: if they are already in the db
-            # For those we can update the disease_id in lgd to point to the existing disease
-            if "errors" in response_json:
-                for error in response_json["errors"]:
-                    print(
-                        f"Update LGD records: replace disease_id {error['id']} by {error['existing_id']}"
-                    )
-                    lgd_disease_to_update.append(
-                        {
-                            "disease_id": error["id"],
-                            "new_disease_id": error["existing_id"],
-                        }
-                    )
-        else:
-            print(
-                "Failed to update diseases:",
-                response_update.status_code,
-                response_update.json(),
+    if diseases_to_update:
+        try:
+            response_update = requests.post(
+                disease_url, json=diseases_to_update, cookies=cookies
             )
-    except Exception as e:
-        print("Error while updating diseases:", str(e))
+            if response_update.status_code == 200:
+                response_json = response_update.json()
+                print("Diseases updated successfully:", response_json)
+                # Some diseases were probably not updated: if they are already in the db
+                # For those we can update the disease_id in lgd to point to the existing disease
+                if "errors" in response_json:
+                    for error in response_json["errors"]:
+                        print(
+                            f"Update LGD records: replace disease_id {error['id']} by {error['existing_id']}"
+                        )
+                        lgd_disease_to_update.append(
+                            {
+                                "disease_id": error["id"],
+                                "new_disease_id": error["existing_id"],
+                            }
+                        )
+            else:
+                print(
+                    "Failed to update diseases:",
+                    response_update.status_code,
+                    response_update.json(),
+                )
+        except Exception as e:
+            print("Error while updating diseases:", str(e))
 
     if lgd_disease_to_update:
         try:
@@ -471,13 +478,14 @@ def main():
             "disease name",
             "disease name formatted",
             "allelic requirement",
+            "add synonym",
         ]
 
         with open(file, "r", encoding="utf-8") as fh:
             header = fh.readline().strip().split("\t")
-            if header[:5] != expected_columns:
+            if header[:6] != expected_columns:
                 sys.exit(
-                    f"Error: File format is incorrect. Found: {header[:5]}; Expected: {expected_columns}"
+                    f"Error: File format is incorrect. Found: {header[:6]}; Expected: {expected_columns}"
                 )
 
         if not dryrun:
