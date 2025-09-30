@@ -1,4 +1,3 @@
-import os.path
 import sys
 import argparse
 import MySQLdb
@@ -30,6 +29,42 @@ import configparser
 SOURCE_NAME = "gnomAD constraint metrics"
 PLI_ATTRIB_VALUE = "pli_gnomAD"
 LOEUF_ATTRIB_VALUE = "loeuf_gnomAD"
+
+
+def validate_input_file(
+    file: str,
+) -> None:
+    """
+    Validate input file.
+
+    Args:
+        file (str): input file name
+    Returns:
+        None
+    """
+    try:
+        with open(file, "r", encoding="utf-8") as fh:
+            header = fh.readline().strip().split("\t")
+            if header[0] != "gene":
+                sys.exit(
+                    f"Error: File format is incorrect. Found: {header[0]}; Expected: 'gene'"
+                )
+            elif header[4] != "mane_select":
+                sys.exit(
+                    f"Error: File format is incorrect. Found: {header[4]}; Expected: 'mane_select'"
+                )
+            elif header[18] != "lof.pLI":
+                sys.exit(
+                    f"Error: File format is incorrect. Found: {header[18]}; Expected: 'lof.pLI'"
+                )
+            elif header[22] != "lof.oe_ci.upper":
+                sys.exit(
+                    f"Error: File format is incorrect. Found: {header[22]}; Expected: 'lof.oe_ci.upper'"
+                )
+    except FileNotFoundError:
+        sys.exit(f"File not found: {file}")
+    except Exception as e:
+        sys.exit(f"Error reading the file: {e}")
 
 
 def get_locus_id_from_g2p_db(
@@ -113,25 +148,36 @@ def read_input_file(
         LOEUF_ATTRIB_VALUE, db_host, db_port, db_name, user, password
     )
 
-    f = open(file, "r")
-    previous_gene = ""
-    is_previous_gene_mane_select_transcript_exists = False
-    for line in f:
-        if not line.startswith("gene"):
-            line_data = line.split("\t")
-            gene = line_data[0]
-            if previous_gene != "" and gene != previous_gene:
-                if not is_previous_gene_mane_select_transcript_exists:
-                    print(f"Gene '{gene}' does not have MANE transcript.")
-                previous_gene = gene
-                is_previous_gene_mane_select_transcript_exists = False
-            if gene in list_gene_ids:
+    with open(file, "r", encoding="utf-8") as f:
+        previous_gene = ""
+        is_previous_gene_success = False
+        for line in f:
+            if not line.startswith("gene"):
+                line_data = line.split("\t")
+                current_gene = line_data[0]
+                transcript = line_data[2]
                 mane_select = line_data[4]
-                if mane_select == "TRUE":
+                if current_gene != previous_gene:
+                    if previous_gene != "" and not is_previous_gene_success:
+                        if previous_gene not in list_gene_ids:
+                            print(
+                                f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
+                            )
+                        else:
+                            print(
+                                f"Warning: Gene '{previous_gene}' does not have MANE transcript. Skipped gene."
+                            )
+                    previous_gene = current_gene
+                    is_previous_gene_success = False
+                if (
+                    current_gene in list_gene_ids
+                    and transcript.startswith("ENST")
+                    and mane_select
+                ):
                     pli_score = line_data[18]
                     pli_score_line = (
-                        gene,
-                        list_gene_ids[gene],
+                        current_gene,
+                        list_gene_ids[current_gene],
                         pli_score,
                         source_id,
                         pli_attrib_id,
@@ -139,20 +185,26 @@ def read_input_file(
                     final_data_to_insert.append(pli_score_line)
                     loeuf_score = line_data[22]
                     loeuf_score_line = (
-                        gene,
-                        list_gene_ids[gene],
+                        current_gene,
+                        list_gene_ids[current_gene],
                         loeuf_score,
                         source_id,
                         loeuf_attrib_id,
                     )
                     final_data_to_insert.append(loeuf_score_line)
-                    is_previous_gene_mane_select_transcript_exists = True
+                    is_previous_gene_success = True
+        if previous_gene != "" and not is_previous_gene_success:
+            if previous_gene not in list_gene_ids:
+                print(
+                    f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
+                )
             else:
-                print(f"Gene '{gene}' not found in G2P DB.")
-    if previous_gene != "":
-        if not is_previous_gene_mane_select_transcript_exists:
-            print(f"Gene '{gene}' does not have MANE transcript.")
-    f.close()
+                print(
+                    f"Warning: Gene '{previous_gene}' does not have MANE transcript. Skipped gene."
+                )
+
+    if len(final_data_to_insert) == 0:
+        sys.exit("Error: No valid data found in input file.")
 
     return final_data_to_insert
 
@@ -198,7 +250,7 @@ def get_attrib_id(
     """
     Retrieve the ID corresponding to a specific attribute value from the 'attrib' table in the database.
     """
-    get_attrib_id_query = """SELECT id from attrib where value = %s"""
+    get_attrib_id_query = """ SELECT id from attrib where value = %s """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -312,53 +364,32 @@ def main():
     config.read(config_file)
 
     db_host = config["database"]["host"]
-    db_port = config["database"]["port"]
+    db_port = int(config["database"]["port"])
     db_name = config["database"]["name"]
     user = config["database"]["user"]
     pwd = config["database"]["password"]
 
-    if os.path.isfile(file):
-        # Validate input file
-        with open(file, "r", encoding="utf-8") as fh:
-            header = fh.readline().strip().split("\t")
-            if header[0] != "gene":
-                sys.exit(
-                    f"Error: File format is incorrect. Found: {header[0]}; Expected: 'gene'"
-                )
-            elif header[4] != "mane_select":
-                sys.exit(
-                    f"Error: File format is incorrect. Found: {header[4]}; Expected: 'mane_select'"
-                )
-            elif header[18] != "lof.pLI":
-                sys.exit(
-                    f"Error: File format is incorrect. Found: {header[18]}; Expected: 'lof.pLI'"
-                )
-            elif header[22] != "lof.oe_ci.upper":
-                sys.exit(
-                    f"Error: File format is incorrect. Found: {header[22]}; Expected: 'lof.oe_ci.upper'"
-                )
+    print("Validating input file...")
+    validate_input_file(file)
+    print("Validating input file... done\n")
 
-        print("Getting locus id from G2P DB...")
-        list_gene_ids = get_locus_id_from_g2p_db(
-            db_host, int(db_port), db_name, user, pwd
-        )
-        print("Getting locus id from G2P DB... done\n")
+    print("Getting locus id from G2P DB...")
+    list_gene_ids = get_locus_id_from_g2p_db(db_host, db_port, db_name, user, pwd)
+    print("Getting locus id from G2P DB... done\n")
 
-        print("Reading input file...")
-        final_scores = read_input_file(
-            file, list_gene_ids, db_host, db_port, db_name, user, pwd
-        )
-        print("Reading input file... done\n")
+    print("Reading input file...")
+    final_scores = read_input_file(
+        file, list_gene_ids, db_host, db_port, db_name, user, pwd
+    )
+    print("Reading input file... done\n")
 
-        print("Inserting data into gene_stats table...")
-        insert_into_gene_stats(final_scores, db_host, db_port, db_name, user, pwd)
-        print("Inserting data into gene_stats table... done\n")
+    print("Inserting data into gene_stats table...")
+    insert_into_gene_stats(final_scores, db_host, db_port, db_name, user, pwd)
+    print("Inserting data into gene_stats table... done\n")
 
-        print("Inserting data into meta table...")
-        insert_details_into_meta(db_host, db_port, db_name, user, pwd)
-        print("Inserting data into meta table... done\n")
-    else:
-        print(f"Input file '{file}' is invalid")
+    print("Inserting data into meta table...")
+    insert_details_into_meta(db_host, db_port, db_name, user, pwd)
+    print("Inserting data into meta table... done\n")
 
 
 if __name__ == "__main__":
