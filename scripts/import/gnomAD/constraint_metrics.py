@@ -172,7 +172,7 @@ def read_input_file(
                 if (
                     current_gene in list_gene_ids
                     and transcript.startswith("ENST")
-                    and mane_select
+                    and mane_select == "true"
                 ):
                     pli_score = line_data[18]
                     pli_score_line = (
