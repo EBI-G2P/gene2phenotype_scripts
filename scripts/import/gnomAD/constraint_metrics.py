@@ -150,7 +150,7 @@ def read_input_file(
 
     with open(file, "r", encoding="utf-8") as f:
         previous_gene = ""
-        is_previous_gene_success = False
+        previous_gene_success_count = 0
         for line in f:
             if not line.startswith("gene"):
                 line_data = line.split("\t")
@@ -158,17 +158,21 @@ def read_input_file(
                 transcript = line_data[2]
                 mane_select = line_data[4]
                 if current_gene != previous_gene:
-                    if previous_gene != "" and not is_previous_gene_success:
+                    if previous_gene != "" and previous_gene_success_count != 1:
                         if previous_gene not in list_gene_ids:
                             print(
                                 f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
                             )
-                        else:
+                        elif previous_gene_success_count == 0:
                             print(
                                 f"Warning: Gene '{previous_gene}' does not have MANE transcript. Skipped gene."
                             )
+                        elif previous_gene_success_count > 1:
+                            print(
+                                f"Warning: Gene '{previous_gene}' has multiple MANE transcripts."
+                            )
                     previous_gene = current_gene
-                    is_previous_gene_success = False
+                    previous_gene_success_count = 0
                 if (
                     current_gene in list_gene_ids
                     and transcript.startswith("ENST")
@@ -192,16 +196,18 @@ def read_input_file(
                         loeuf_attrib_id,
                     )
                     final_data_to_insert.append(loeuf_score_line)
-                    is_previous_gene_success = True
-        if previous_gene != "" and not is_previous_gene_success:
+                    previous_gene_success_count += 1
+        if previous_gene != "" and previous_gene_success_count != 1:
             if previous_gene not in list_gene_ids:
                 print(
                     f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
                 )
-            else:
+            elif previous_gene_success_count == 0:
                 print(
                     f"Warning: Gene '{previous_gene}' does not have MANE transcript. Skipped gene."
                 )
+            elif previous_gene_success_count > 1:
+                print(f"Warning: Gene '{previous_gene}' has multiple MANE transcripts.")
 
     if len(final_data_to_insert) == 0:
         sys.exit("Error: No valid data found in input file.")
