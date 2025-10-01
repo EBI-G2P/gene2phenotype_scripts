@@ -6,6 +6,7 @@ import argparse
 import MySQLdb
 import requests
 import configparser
+from typing import Union
 
 """
     Script to update disease names.
@@ -44,7 +45,7 @@ unique_diseases_from_input = set()
 
 def dump_data(
     db_host: str, db_port: int, db_name: str, user: str, password: str
-) -> dict[str, list]:
+) -> Union[dict[str, list], dict[str, list]]:
     """
     Dumps the current data from the G2P database.
 
@@ -56,9 +57,11 @@ def dump_data(
         password (str): password
 
     Returns:
-        dict[str, dict]: dict of diseases by name and associated records
+        dict[str, dict], dict[str, list]: dict of diseases by name and associated records
+                                          dict of diseases by name and associated ontologies
     """
     diseases = {}  # key = disease name; value = list of record ids
+    disease_ontologies = {}  # key = disease name; value = list of disease ontologies
 
     sql_disease = """ SELECT d.name, d.id, lgd.id, g.stable_id, g.is_deleted, a.value
                       FROM disease d
@@ -67,6 +70,15 @@ def dump_data(
                       LEFT JOIN attrib a ON a.id = lgd.genotype_id
                       ORDER BY d.name
                   """
+
+    sql_disease_ontology = """  SELECT d.name, d.id, ot.accession, ot.term, ot.description, s.name
+                                FROM disease d
+                                LEFT JOIN disease_ontology_term dot ON dot.disease_id = d.id
+                                LEFT JOIN ontology_term ot ON ot.id = dot.ontology_term_id
+                                LEFT JOIN source s ON ot.source_id = s.id
+                                WHERE ot.accession IS NOT NULL
+                                ORDER BY d.name
+                           """
 
     db = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -97,9 +109,35 @@ def dump_data(
                 }
             )
 
+    # Get disease ontologies
+    cursor.execute(sql_disease_ontology)
+    data_disease_ontologies = cursor.fetchall()
+    for row in data_disease_ontologies:
+        if row[0] not in disease_ontologies:
+            disease_ontologies[row[0]] = {
+                "disease_id": row[1],
+                "ontologies": [
+                    {
+                        "accession": row[2],
+                        "term": row[3],
+                        "description": row[4],
+                        "source": row[5]
+                    }
+                ]
+            }
+        else:
+            disease_ontologies[row[0]]["ontologies"].append(
+                {
+                    "accession": row[2],
+                    "term": row[3],
+                    "description": row[4],
+                    "source": row[5]
+                }
+            )
+
     db.close()
 
-    return diseases
+    return diseases, disease_ontologies
 
 
 def login(
@@ -131,6 +169,7 @@ def logout(api_url: str, cookies: requests.cookies.RequestsCookieJar) -> None:
 def read_file(
     file: str,
     diseases: dict[str, dict],
+    disease_ontologies: dict[str, dict],
     dryrun: bool,
     api_url: str,
     cookies: requests.cookies.RequestsCookieJar,
@@ -141,6 +180,7 @@ def read_file(
     Args:
         file (str): tab delimited input file
         diseases (dict[str, dict]): dictionary of diseases by name and associated records
+        disease_ontologies (dict[str, dict]): dictionary of diseases by name and associated ontologies
         dryrun (bool): run script in update mode (default: 0)
         api_url (str): G2P API URL
         cookies (requests.cookies.RequestsCookieJar): cookies contained tokens (login credentials)
@@ -236,9 +276,14 @@ def read_file(
                                             f"   Update disease in lgd table. Going to update LGD record {g2p_id}: replace disease_id {db_data['disease_id']} by new disease {new_disease}"
                                         )
                                     else:
+                                        # Before creating the disease check if existing disease
+                                        # has disease ontologies
+                                        ontologies_to_add = []
+                                        if current_disease in disease_ontologies:
+                                            ontologies_to_add = disease_ontologies[current_disease]["ontologies"]
                                         # Call endpoint to create new disease
                                         new_disease_id = add_disease(
-                                            new_disease, api_url, cookies
+                                            new_disease, ontologies_to_add, api_url, cookies
                                         )
                                         if not new_disease_id:
                                             wr_diseases.write(
@@ -328,11 +373,11 @@ def read_file(
 
 
 def add_disease(
-    disease_name: str, api_url: str, cookies: requests.cookies.RequestsCookieJar
+    disease_name: str, ontologies: list, api_url: str, cookies: requests.cookies.RequestsCookieJar
 ) -> int:
     """
-    Method to create a new disease.
-    This method calls the following gene2phenotype API endpoint:
+    Method to create a new disease and its corresponding ontologies.
+    This method calls the following gene2phenotype API endpoints:
         - add/disease/
     It returns the disease id just that was just created.
     """
@@ -340,7 +385,7 @@ def add_disease(
     disease_id = None
 
     # Prepare disease input data
-    disease_data = {"name": disease_name}
+    disease_data = {"name": disease_name, "ontology_terms": ontologies}
 
     try:
         response_add = requests.post(
@@ -357,7 +402,7 @@ def add_disease(
                 response_add.json(),
             )
     except Exception as e:
-        print("Error while adding disease:", str(e))
+        print(f"Error while adding disease '{disease_name}':", str(e))
 
     return disease_id
 
@@ -468,7 +513,7 @@ def main():
     cookies = None
 
     print("Dump data from G2P...")
-    diseases = dump_data(db_host, int(db_port), db_name, user, password)
+    diseases, disease_ontologies = dump_data(db_host, int(db_port), db_name, user, password)
     print("Dump data from G2P... done\n")
 
     if os.path.isfile(file):
@@ -493,7 +538,7 @@ def main():
             cookies = login(api_username, api_password, api_url)
 
         print("Parsing diseases to update...")
-        diseases_to_update = read_file(file, diseases, dryrun, api_url, cookies)
+        diseases_to_update = read_file(file, diseases, disease_ontologies, dryrun, api_url, cookies)
         print("Parsing diseases to update... done\n")
 
         if not dryrun:
