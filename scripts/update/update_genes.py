@@ -979,20 +979,20 @@ def main():
     )
     parser.add_argument("--working_dir", required=True, help="Working directory")
     parser.add_argument(
-        "--update_gene_symbol",
+        "--only_update_gene_symbol",
         action="store_true",
-        help="Only updates the gene symbols",
+        help="Only update the gene symbol and identifiers from the HGNC file",
     )
     args = parser.parse_args()
 
     config_file = args.config
     version = args.version
     working_dir = args.working_dir
-    update_gene_symbol = args.update_gene_symbol
+    only_update_gene_symbol = args.only_update_gene_symbol
 
-    if not update_gene_symbol and not version:
+    if not only_update_gene_symbol and not version:
         sys.exit(
-            "You have to provide an Ensembl version (--version) or run with option --update_gene_symbol"
+            "You have to provide an Ensembl version (--version) or run with option --only_update_gene_symbol"
         )
 
     hgnc_file_url = "https://storage.googleapis.com/public-download-files/hgnc/tsv/tsv/hgnc_complete_set.txt"
@@ -1033,7 +1033,7 @@ def main():
         "gene2phenotype_app_historicallocusgenotypedisease",  # history table
     ]
 
-    if not update_gene_symbol:
+    if not only_update_gene_symbol:
         print("Updating gene set...")
         # Download Ensembl file
         ensembl_gtf_url = f"https://ftp.ensembl.org/pub/release-{version}/gtf/homo_sapiens/Homo_sapiens.GRCh38.{version}.chr.gtf.gz"
@@ -1111,7 +1111,7 @@ def main():
     print("Running checks... done")
 
     # Update meta
-    update_meta(db_host, db_port, db_name, user, password, version, update_gene_symbol)
+    update_meta(db_host, db_port, db_name, user, password, version, only_update_gene_symbol)
 
 
 if __name__ == "__main__":
