@@ -49,9 +49,13 @@ def validate_input_file(
                 sys.exit(
                     f"Error: File format is incorrect. Found: {header[0]}; Expected: 'gene'"
                 )
-            elif header[4] != "mane_select":
+            elif header[1] != "gene_id":
                 sys.exit(
-                    f"Error: File format is incorrect. Found: {header[4]}; Expected: 'mane_select'"
+                    f"Error: File format is incorrect. Found: {header[1]}; Expected: 'gene_id'"
+                )
+            elif header[3] != "canonical":
+                sys.exit(
+                    f"Error: File format is incorrect. Found: {header[3]}; Expected: 'canonical'"
                 )
             elif header[18] != "lof.pLI":
                 sys.exit(
@@ -65,6 +69,247 @@ def validate_input_file(
         sys.exit(f"File not found: {file}")
     except Exception as e:
         sys.exit(f"Error reading the file: {e}")
+
+
+def validate_previous_gene_data(
+    locus_to_locus_id_mapping: dict[str, str],
+    ensembl_to_gene_mapping: dict[str, str],
+    previous_gene: str,
+    previous_ensembl_gene_id: str,
+    is_success: bool,
+) -> None:
+    """
+    Validate previous gene data. This function is used when iterating over input file rows.
+
+    Args:
+        locus_to_locus_id_mapping(dict[str, str]): dict of genes and associated ids
+        ensembl_to_gene_mapping(dict[str, str]): dict of ensembl id and associated gene name
+        previous_gene (str): previous gene
+        previous_ensembl_gene_id (str): previous Ensembl gene id
+        is_success (bool): Flag to track if previous gene data was a success
+
+    Returns:
+        None
+    """
+    if previous_gene != "" and not is_success:
+        if previous_gene not in locus_to_locus_id_mapping:
+            if previous_ensembl_gene_id == "":
+                print(
+                    f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
+                )
+            elif previous_ensembl_gene_id not in ensembl_to_gene_mapping:
+                print(
+                    f"Warning: Gene '{previous_gene}' with Ensembl Gene Id '{previous_ensembl_gene_id}' not found in G2P DB. Skipped gene."
+                )
+            elif previous_ensembl_gene_id in ensembl_to_gene_mapping:
+                print(
+                    f"Warning: Gene '{previous_gene}' not found in G2P DB but Ensembl Gene Id '{previous_ensembl_gene_id}' found in G2P DB linked to different Gene '{ensembl_to_gene_mapping[previous_ensembl_gene_id]}'. Skipped gene."
+                )
+        elif previous_gene in locus_to_locus_id_mapping:
+            if previous_ensembl_gene_id == "":
+                print(
+                    f"Warning: Gene '{previous_gene}' does not have associated Ensembl data in input file data. Skipped gene."
+                )
+            elif not is_success:
+                print(
+                    f"Warning: Gene '{previous_gene}' does not have canonical transcript in input file data. Skipped gene."
+                )
+
+
+def validate_scores(
+    locus_to_locus_id_mapping: dict[str, str],
+    gene: str,
+    gene_id: str,
+    pli_score: str,
+    loeuf_score: str,
+    pli_attrib_id: str,
+    loeuf_attrib_id: str,
+    source_id: str,
+    is_empty_gene: bool = False,
+) -> list[tuple[str, str, str, str, str]]:
+    """
+    Validate pli and loeuf scores. This function is used when iterating over input file rows.
+
+    Args:
+        locus_to_locus_id_mapping(dict[str, str]): dict of gene and associated ID
+        gene (str): gene
+        gene_id (str): gene ID
+        pli_score (str): PLI score
+        loeuf_score (str):  LOEUF score
+        pli_attrib_id (str): PLI Attrib ID in G2P DB
+        loeuf_attrib_id (str): LOEUF Attrib ID in G2P DB
+        source_id (str): Source ID in G2P DB
+        is_empty_gene (bool): Boolean flag to check if gene is 'NA' gene
+
+    Returns:
+        list[tuple[str, str, str, str, str]]: list of tuples containing db values to insert
+    """
+    score_data_to_insert = []
+    gene_to_print = ""
+    if is_empty_gene:
+        gene_to_print = "NA"
+    else:
+        gene_to_print = gene
+    if (not pli_score or pli_score == "NA" or pli_score == "") and (
+        not loeuf_score or loeuf_score == "NA" or loeuf_score == ""
+    ):
+        print(
+            f"Warning: Gene '{gene_to_print}' with Gene ID '{gene_id}' has empty 'pli' and 'loeuf' scores in input file data. Skipped gene."
+        )
+    elif not loeuf_score or loeuf_score == "NA" or loeuf_score == "":
+        score_data_to_insert.append(
+            (
+                gene,
+                locus_to_locus_id_mapping[gene],
+                pli_score,
+                source_id,
+                pli_attrib_id,
+            )
+        )
+        print(
+            f"Warning: Gene '{gene_to_print}' has empty 'loeuf' score in input file data. Processed 'pli' score but skipped 'loeuf' score."
+        )
+    elif not pli_score or pli_score == "NA" or pli_score == "":
+        score_data_to_insert.append(
+            (
+                gene,
+                locus_to_locus_id_mapping[gene],
+                loeuf_score,
+                source_id,
+                loeuf_attrib_id,
+            )
+        )
+        print(
+            f"Warning: Gene '{gene_to_print}' has empty 'pli' score in input file data. Processed 'loeuf' score but skipped 'pli' score."
+        )
+    else:
+        score_data_to_insert.append(
+            (
+                gene,
+                locus_to_locus_id_mapping[gene],
+                pli_score,
+                source_id,
+                pli_attrib_id,
+            )
+        )
+        score_data_to_insert.append(
+            (
+                gene,
+                locus_to_locus_id_mapping[gene],
+                loeuf_score,
+                source_id,
+                loeuf_attrib_id,
+            )
+        )
+    return score_data_to_insert
+
+
+def process_empty_genes(
+    empty_genes_data_list: list[tuple[str, str, str, str]],
+    ensembl_to_gene_mapping: dict[str, str],
+    locus_to_locus_id_mapping: dict[str, str],
+    pli_attrib_id: str,
+    loeuf_attrib_id: str,
+    source_id: str,
+):
+    """
+    Process 'NA' genes data
+
+    Args:
+        empty_genes_data_list(list[tuple[str, str, str, str]]): data with empty genes data
+        ensembl_to_gene_mapping(dict[str, str]): dict of ensembl id and associated gene name
+        locus_to_locus_id_mapping(dict[str, str]): dict of gene and associated ID
+        pli_attrib_id (str): PLI Attrib ID in G2P DB
+        loeuf_attrib_id (str): LOEUF Attrib ID in G2P DB
+        source_id (str): Source ID in G2P DB
+
+    Returns:
+        list[tuple[str, str, str, str, str]]: list of tuples containing db values to insert
+    """
+    data_to_insert = []
+    ensembl_gene_id_to_canonical_mapping = {}
+    non_ensembl_gene_id_list = []
+    not_found_ensembl_gene_id_list = []
+    # Process 'NA' Genes data
+    for item in empty_genes_data_list:
+        gene_id, canonical, pli_score, loeuf_score = item
+        if not gene_id.startswith("ENSG"):
+            if gene_id not in non_ensembl_gene_id_list:
+                print(
+                    f"Warning: Gene 'NA' with Gene ID '{gene_id}' is not Ensembl Gene Id. Skipped gene."
+                )
+                non_ensembl_gene_id_list.append(gene_id)
+        else:
+            if gene_id in ensembl_to_gene_mapping:
+                if gene_id not in ensembl_gene_id_to_canonical_mapping:
+                    if canonical == "true":
+                        gene = ensembl_to_gene_mapping[gene_id]
+                        score_data_to_insert = validate_scores(
+                            locus_to_locus_id_mapping,
+                            gene,
+                            gene_id,
+                            pli_score,
+                            loeuf_score,
+                            pli_attrib_id,
+                            loeuf_attrib_id,
+                            source_id,
+                            True,
+                        )
+                        data_to_insert.extend(score_data_to_insert)
+                        ensembl_gene_id_to_canonical_mapping[gene_id] = True
+                    elif canonical == "false":
+                        ensembl_gene_id_to_canonical_mapping[gene_id] = False
+                else:
+                    if ensembl_gene_id_to_canonical_mapping[gene_id]:
+                        if canonical == "true":
+                            print(
+                                f"Warning: Gene 'NA' with Gene ID '{gene_id}' has multiple canonical transcripts in input file data. Skipped gene."
+                            )
+                    else:
+                        if canonical == "true":
+                            gene = ensembl_to_gene_mapping[gene_id]
+                            score_data_to_insert = validate_scores(
+                                locus_to_locus_id_mapping,
+                                gene,
+                                gene_id,
+                                pli_score,
+                                loeuf_score,
+                                pli_attrib_id,
+                                loeuf_attrib_id,
+                                source_id,
+                                True,
+                            )
+                            data_to_insert.extend(score_data_to_insert)
+                            ensembl_gene_id_to_canonical_mapping[gene_id] = True
+            else:
+                if gene_id not in not_found_ensembl_gene_id_list:
+                    print(
+                        f"Warning: Gene 'NA' with Gene ID '{gene_id}' not found in G2P DB. Skipped gene."
+                    )
+                    not_found_ensembl_gene_id_list.append(gene_id)
+    for key, value in ensembl_gene_id_to_canonical_mapping.items():
+        if not value:
+            print(
+                f"Warning: Gene 'NA' with Gene ID '{key}' does not have canonical transcript in input file data. Skipped gene."
+            )
+    return data_to_insert
+
+
+def get_unique_gene_count(final_scores: list[tuple[str, str, str, str, str]]) -> int:
+    """
+    Calculate number of unique genes.
+
+    Args:
+        final_scores (list[tuple[str, str, str, str, str]]): list of tuples containing db values to insert
+
+    Returns:
+        int: number of unique genes
+    """
+    unique_gene_set = set()
+    for item in final_scores:
+        gene = item[0]
+        unique_gene_set.add(gene)
+    return len(unique_gene_set)
 
 
 def get_locus_id_from_g2p_db(
@@ -81,9 +326,9 @@ def get_locus_id_from_g2p_db(
         password (str): password
 
     Returns:
-        dict[str, str]: dict of genes and associated ids
+        dict[str, str]: dict of locus and associated ID
     """
-    final_list = {}
+    locus_to_locus_id_mapping = {}
 
     sql_get_locus = """ SELECT id, name from locus """
     sql_get_locus_attrib = """ SELECT locus_id, value from locus_attrib """
@@ -96,24 +341,65 @@ def get_locus_id_from_g2p_db(
     cursor.execute(sql_get_locus)
     data = cursor.fetchall()
     for row in data:
-        if row[1] not in final_list:
-            final_list[row[1]] = row[0]
+        locus_id, locus = row
+        if locus not in locus_to_locus_id_mapping:
+            locus_to_locus_id_mapping[locus] = locus_id
 
     cursor.execute(sql_get_locus_attrib)
     data_2 = cursor.fetchall()
     for row in data_2:
-        if row[1] not in final_list:
-            final_list[row[1]] = row[0]
+        locus_id, locus = row
+        if locus not in locus_to_locus_id_mapping:
+            locus_to_locus_id_mapping[locus] = locus_id
 
     cursor.close()
     database.close()
 
-    return final_list
+    return locus_to_locus_id_mapping
+
+
+def get_ensembl_id_from_g2p_db(
+    db_host: str, db_port: int, db_name: str, user: str, password: str
+) -> dict[str, str]:
+    """
+    Retrieves Ensembl IDs from the G2P database.
+
+    Args:
+        db_host (str): hostname
+        db_port (int): port
+        db_name (str): G2P database name
+        user (str): username
+        password (str): password
+
+    Returns:
+        dict[str, str]: dict of Ensembl ID and associated gene name
+    """
+    ensembl_to_gene_mapping = {}
+
+    sql_get_ensembl_gene_id = """ SELECT identifier, name from locus_identifier join locus on locus_identifier.locus_id = locus.id """
+
+    database = MySQLdb.connect(
+        host=db_host, port=db_port, user=user, passwd=password, db=db_name
+    )
+    cursor = database.cursor()
+
+    cursor.execute(sql_get_ensembl_gene_id)
+    data = cursor.fetchall()
+    for row in data:
+        ensembl_id, gene = row
+        if ensembl_id not in ensembl_to_gene_mapping:
+            ensembl_to_gene_mapping[ensembl_id] = gene
+
+    cursor.close()
+    database.close()
+
+    return ensembl_to_gene_mapping
 
 
 def read_input_file(
     file: str,
-    list_gene_ids: dict[str, str],
+    locus_to_locus_id_mapping: dict[str, str],
+    ensembl_to_gene_mapping: dict[str, str],
     db_host: str,
     db_port: int,
     db_name: str,
@@ -125,7 +411,8 @@ def read_input_file(
 
     Args:
         file (str): input file name
-        list_gene_ids(dict[str, str]): dict of genes and associated ids
+        locus_to_locus_id_mapping(dict[str, str]): dict of genes and associated ids
+        ensembl_to_gene_mapping(dict[str, str]): dict of ensembl gene id and associated gene names
         db_host (str): hostname
         db_port (int): port
         db_name (str): G2P database name
@@ -148,71 +435,99 @@ def read_input_file(
         LOEUF_ATTRIB_VALUE, db_host, db_port, db_name, user, password
     )
 
+    empty_genes_data_list = []
     with open(file, "r", encoding="utf-8") as f:
         previous_gene = ""
-        previous_gene_success_count = 0
+        previous_ensembl_gene_id = ""
+        is_success = False
+        # Below logic will process valid genes; 'NA' genes data will be processed afterwards
         for line in f:
             if not line.startswith("gene"):
                 line_data = line.split("\t")
                 current_gene = line_data[0]
-                transcript = line_data[2]
-                mane_select = line_data[4]
-                if current_gene != previous_gene:
-                    if previous_gene != "" and previous_gene_success_count != 1:
-                        if previous_gene not in list_gene_ids:
-                            print(
-                                f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
-                            )
-                        elif previous_gene_success_count == 0:
-                            print(
-                                f"Warning: Gene '{previous_gene}' does not have MANE transcript. Skipped gene."
-                            )
-                        elif previous_gene_success_count > 1:
-                            print(
-                                f"Warning: Gene '{previous_gene}' has multiple MANE transcripts."
-                            )
-                    previous_gene = current_gene
-                    previous_gene_success_count = 0
-                if (
-                    current_gene in list_gene_ids
-                    and transcript.startswith("ENST")
-                    and mane_select == "true"
-                ):
-                    pli_score = line_data[18]
-                    pli_score_line = (
-                        current_gene,
-                        list_gene_ids[current_gene],
-                        pli_score,
-                        source_id,
-                        pli_attrib_id,
+                gene_id = line_data[1]
+                canonical = line_data[3]
+                pli_score = line_data[18]
+                loeuf_score = line_data[22]
+                if current_gene == "NA":
+                    empty_genes_data_list.append(
+                        (gene_id, canonical, pli_score, loeuf_score)
                     )
-                    final_data_to_insert.append(pli_score_line)
-                    loeuf_score = line_data[22]
-                    loeuf_score_line = (
-                        current_gene,
-                        list_gene_ids[current_gene],
-                        loeuf_score,
-                        source_id,
-                        loeuf_attrib_id,
-                    )
-                    final_data_to_insert.append(loeuf_score_line)
-                    previous_gene_success_count += 1
-        if previous_gene != "" and previous_gene_success_count != 1:
-            if previous_gene not in list_gene_ids:
-                print(
-                    f"Warning: Gene '{previous_gene}' not found in G2P DB. Skipped gene."
-                )
-            elif previous_gene_success_count == 0:
-                print(
-                    f"Warning: Gene '{previous_gene}' does not have MANE transcript. Skipped gene."
-                )
-            elif previous_gene_success_count > 1:
-                print(f"Warning: Gene '{previous_gene}' has multiple MANE transcripts.")
+                else:
+                    if current_gene != previous_gene:
+                        validate_previous_gene_data(
+                            locus_to_locus_id_mapping,
+                            ensembl_to_gene_mapping,
+                            previous_gene,
+                            previous_ensembl_gene_id,
+                            is_success,
+                        )
+                        previous_gene = current_gene
+                        previous_ensembl_gene_id = ""
+                        is_success = False
+                    if gene_id.startswith("ENSG"):
+                        previous_ensembl_gene_id = gene_id
+                    if (
+                        current_gene in locus_to_locus_id_mapping
+                        and gene_id.startswith("ENSG")
+                        and canonical == "true"
+                    ):
+                        if not is_success:
+                            score_data_to_insert = validate_scores(
+                                locus_to_locus_id_mapping,
+                                current_gene,
+                                gene_id,
+                                pli_score,
+                                loeuf_score,
+                                pli_attrib_id,
+                                loeuf_attrib_id,
+                                source_id,
+                            )
+                            final_data_to_insert.extend(score_data_to_insert)
+                            is_success = True
+                        else:
+                            print(
+                                f"Warning: Gene '{current_gene}' has multiple canonical transcripts in input file data. Processed first match but skipped row with Gene '{current_gene}', Gene ID '{gene_id}' and canonical value '{canonical}'."
+                            )
+        validate_previous_gene_data(
+            locus_to_locus_id_mapping,
+            ensembl_to_gene_mapping,
+            previous_gene,
+            previous_ensembl_gene_id,
+            is_success,
+        )
+
+    # Process 'NA' genes data
+    empty_genes_data_to_insert = process_empty_genes(
+        empty_genes_data_list,
+        ensembl_to_gene_mapping,
+        locus_to_locus_id_mapping,
+        pli_attrib_id,
+        loeuf_attrib_id,
+        source_id,
+    )
+    final_data_to_insert.extend(empty_genes_data_to_insert)
 
     if len(final_data_to_insert) == 0:
         sys.exit("Error: No valid data found in input file.")
 
     return final_data_to_insert
+
+
+def print_data_to_insert(final_scores: list[tuple[str, str, str, str, str]]) -> None:
+    """
+    Prints stats of the data to insert.
+
+    Args:
+        final_scores (list[tuple[str, str, str, str, str]]): list of tuples containing db values to insert
+
+    Returns:
+        None
+    """
+    print("----")
+    print("Number of rows to be inserted: ", len(final_scores))
+    print("Number of genes with scores: ", get_unique_gene_count(final_scores))
+    print("----")
 
 
 def insert_into_gene_stats(
@@ -380,14 +695,31 @@ def main():
     print("Validating input file... done\n")
 
     print("Getting locus id from G2P DB...")
-    list_gene_ids = get_locus_id_from_g2p_db(db_host, db_port, db_name, user, pwd)
+    locus_to_locus_id_mapping = get_locus_id_from_g2p_db(
+        db_host, db_port, db_name, user, pwd
+    )
     print("Getting locus id from G2P DB... done\n")
+
+    print("Getting ensembl gene id from G2P DB...")
+    ensembl_to_gene_mapping = get_ensembl_id_from_g2p_db(
+        db_host, db_port, db_name, user, pwd
+    )
+    print("Getting ensembl gene id from G2P DB... done\n")
 
     print("Reading input file...")
     final_scores = read_input_file(
-        file, list_gene_ids, db_host, db_port, db_name, user, pwd
+        file,
+        locus_to_locus_id_mapping,
+        ensembl_to_gene_mapping,
+        db_host,
+        db_port,
+        db_name,
+        user,
+        pwd,
     )
     print("Reading input file... done\n")
+
+    print_data_to_insert(final_scores)
 
     print("Inserting data into gene_stats table...")
     insert_into_gene_stats(final_scores, db_host, db_port, db_name, user, pwd)
