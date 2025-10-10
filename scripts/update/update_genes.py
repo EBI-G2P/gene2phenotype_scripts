@@ -79,6 +79,7 @@ def check_disease_names(
                 LEFT JOIN disease d ON d.id = lgd.disease_id
                 LEFT JOIN g2p_stableid g ON g.id = lgd.stable_id
                 LEFT JOIN locus l ON l.id = lgd.locus_id
+                WHERE g.is_deleted = 0
           """
 
     db = MySQLdb.connect(
@@ -779,9 +780,6 @@ def update_xrefs(
                 ):
                     add_synonym = True
                 if current_gene_symbol != new_gene_symbol:
-                    print(
-                        f"\nlocus_id: {g2p_data['locus_id']}; old gene symbol {current_gene_symbol}; new gene symbol {new_gene_symbol}"
-                    )
                     update_locus_name(
                         new_gene_symbol,
                         current_gene_symbol,
