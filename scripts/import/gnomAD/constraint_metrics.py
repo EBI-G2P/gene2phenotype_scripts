@@ -20,7 +20,9 @@ import configparser
                         [api]
                         api_url = <>
 
-            --file : input file path
+            --file : input file
+                    Input file can be download from the URL: https://gnomad.broadinstitute.org/downloads#v4-constraint
+                    File should be in TSV (.tsv) file format.
 
 """
 
@@ -415,7 +417,7 @@ def main():
     parser.add_argument(
         "--file",
         required=True,
-        help="Input file path",
+        help="Input file",
     )
     args = parser.parse_args()
 
