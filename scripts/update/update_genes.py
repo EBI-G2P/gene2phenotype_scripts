@@ -959,7 +959,7 @@ def update_meta(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
     )
     cursor = db.cursor()
-    # Fetch the Ensembl source_id
+    # Fetch the source_id
     cursor.execute(sql_version)
     source_id = cursor.fetchone()
     # Add new row to meta
