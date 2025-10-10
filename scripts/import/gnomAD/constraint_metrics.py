@@ -26,13 +26,13 @@ import configparser
 
 
 # Constants
-GNOMAD_CONSTRAINT_METRICS_SOURCE_NAME = "gnomAD constraint metrics"
+GNOMAD_SOURCE_NAME = "gnomAD"
 ENSEMBL_SOURCE_NAME = "Ensembl"
 PLI_ATTRIB_VALUE = "pli_gnomAD"
 LOEUF_ATTRIB_VALUE = "loeuf_gnomAD"
 META_KEY = "gnomAD_constraint_metrics"
 META_DESCRIPTION = "gnomAD constraint metrics"
-META_VERSION = "v4"
+META_VERSION = "v4.1.0"
 
 
 def get_attrib_id(
@@ -214,7 +214,7 @@ def read_input_file(
     final_data_to_insert = []
 
     # Get source id
-    source_id = get_source_id(GNOMAD_CONSTRAINT_METRICS_SOURCE_NAME, db_host, db_port, db_name, user, password)
+    source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, user, password)
 
     # Get attrib id
     pli_attrib_id = get_attrib_id(
@@ -388,7 +388,7 @@ def insert_details_into_meta(
     Returns:
         None
     """
-    source_id = get_source_id(GNOMAD_CONSTRAINT_METRICS_SOURCE_NAME, db_host, db_port, db_name, password, user)
+    source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, password, user)
 
     insert_into_meta_query = """ INSERT into meta(key, date_update, description, version, source_id, is_public) VALUES (%s, %s, %s, %s, %s, %s) """
 
