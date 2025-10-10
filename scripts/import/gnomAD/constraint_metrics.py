@@ -43,7 +43,7 @@ def get_attrib_id(
     """
     Retrieve the ID corresponding to a specific attribute value from the 'attrib' table in the database.
     """
-    get_attrib_id_query = """ SELECT id from attrib where value = %s """
+    get_attrib_id_query = """ SELECT id FROM attrib WHERE value = %s """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -56,6 +56,9 @@ def get_attrib_id(
 
     if attrib_id is None:
         raise ValueError("Attrib ID not found in the database.")
+
+    cursor.close()
+    database.close()
 
     return attrib_id[0]
 
@@ -78,7 +81,7 @@ def get_source_id(
         int: source ID
     """
 
-    get_source_query = """ SELECT id from source where name = %s """
+    get_source_query = """ SELECT id FROM source WHERE name = %s """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -89,14 +92,12 @@ def get_source_id(
     source_id = cursor.fetchone()
 
     if source_id is None:
-        raise ValueError("Source ID not found in the database.")
-
-    source_id = source_id[0]
+        raise ValueError(f"Source '{source_name}' not found in the database.")
 
     cursor.close()
     database.close()
 
-    return source_id
+    return source_id[0]
 
 
 def validate_input_file(
@@ -143,9 +144,9 @@ def is_valid_score(score: str) -> bool:
         score (str): score
 
     Returns:
-        bool: if the scroe is valid or not
+        bool: if the score is valid or not
     """
-    return score and score != "NA" and score != ""
+    return score and score != "" and score != "NA" 
 
 
 def get_ensembl_data_from_g2p_db(
@@ -164,19 +165,19 @@ def get_ensembl_data_from_g2p_db(
     Returns:
         dict[str, tuple[str, str]]: dict of Ensembl ID and associated locus ID, locus name
     """
-    # Get Ensembl source id
-    ensembl_source_id = get_source_id(ENSEMBL_SOURCE_NAME, db_host, db_port, db_name, user, password)
-
     ensembl_to_locus_mapping = {}
 
-    get_ensembl_to_locus_mapping_query = """ SELECT identifier, locus_id, name FROM locus_identifier LEFT JOIN locus ON locus_identifier.locus_id = locus.id WHERE source_id = %s """
+    get_ensembl_to_locus_mapping_query = """ SELECT li.identifier, li.locus_id, l.name FROM locus_identifier li 
+                                                LEFT JOIN locus l ON li.locus_id = l.id 
+                                                LEFT JOIN source s ON li.source_id = s.id 
+                                                WHERE s.name = %s """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
     )
     cursor = database.cursor()
 
-    cursor.execute(get_ensembl_to_locus_mapping_query, (ensembl_source_id,))
+    cursor.execute(get_ensembl_to_locus_mapping_query, (ENSEMBL_SOURCE_NAME))
     data = cursor.fetchall()
     for row in data:
         ensembl_id, locus_id, locus = row
@@ -331,7 +332,7 @@ def read_input_file(
 
     # Print stats of input data processed
     print("----")
-    print("Unqiue Ensembl Gene IDs found : ", len(input_ensembl_to_scores_mapping))
+    print("Unique Ensembl Gene IDs found : ", len(input_ensembl_to_scores_mapping))
     print("Ensembl Gene IDs with valid data : ", success_count)
     print("Data rows to be inserted : ", len(final_data_to_insert))
     print("----")
