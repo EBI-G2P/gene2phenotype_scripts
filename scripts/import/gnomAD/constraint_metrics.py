@@ -392,7 +392,7 @@ def insert_details_into_meta(
     """
     source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, password, user)
 
-    insert_into_meta_query = """ INSERT into meta(key, date_update, description, version, source_id, is_public) VALUES (%s, %s, %s, %s, %s, %s) """
+    insert_into_meta_query = """ INSERT into meta(`key`, date_update, description, version, source_id, is_public) VALUES (%s, %s, %s, %s, %s, %s) """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
