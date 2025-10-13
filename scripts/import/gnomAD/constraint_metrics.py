@@ -388,7 +388,7 @@ def insert_details_into_meta(
     Returns:
         None
     """
-    source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, password, user)
+    source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, user, password)
 
     insert_into_meta_query = """ INSERT into meta(`key`, date_update, description, version, source_id, is_public) VALUES (%s, %s, %s, %s, %s, %s) """
 
