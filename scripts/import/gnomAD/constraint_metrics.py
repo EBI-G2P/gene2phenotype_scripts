@@ -5,7 +5,7 @@ import datetime
 import configparser
 
 """
-    Script to import gene constraints metrics data from gnomAD into the gene_stats table of a G2P database.
+    Script to import gene constraint metrics data from gnomAD into the gene_stats table of a G2P database.
 
     Params:
             --config : Config file name containing the database connection info (mandatory)
@@ -39,6 +39,17 @@ def get_attrib_id(
 ) -> int:
     """
     Retrieve the ID corresponding to a specific attribute value from the 'attrib' table in the database.
+
+    Args:
+        attrib (str): attrib value
+        db_host (str): hostname
+        db_port (int): port
+        db_name (str): G2P database name
+        user (str): username
+        password (str): password
+
+    Returns:
+        int: attrib ID
     """
     get_attrib_id_query = """ SELECT id FROM attrib WHERE value = %s """
 
@@ -96,6 +107,40 @@ def get_source_id(
 
     return source_id[0]
 
+def check_gene_stats(
+    db_host: str, db_port: int, db_name: str, user: str, password: str
+) -> None:
+    """
+    Check if gnomAD constraint metrics data already exists in 'gene_stats' table.
+
+    Args:
+        db_host (str): hostname
+        db_port (int): port
+        db_name (str): G2P database name
+        user (str): username
+        password (str): password
+
+    Returns:
+        None
+    """
+    get_count_query = """ SELECT count(*) FROM gene_stats g 
+                                 LEFT JOIN source s ON g.source_id = s.id
+                                 WHERE s.name = %s """
+
+    database = MySQLdb.connect(
+        host=db_host, port=db_port, user=user, passwd=password, db=db_name
+    )
+    cursor = database.cursor()
+
+    cursor.execute(get_count_query, (GNOMAD_SOURCE_NAME,))
+
+    record_count = cursor.fetchone()[0]
+
+    cursor.close()
+    database.close()
+
+    if record_count > 0:
+        sys.exit("Error: gnomAD constraint metrics data already exists in 'gene_stats' table.")
 
 def validate_input_file(
     file: str,
@@ -431,6 +476,10 @@ def main():
     db_name = config["database"]["name"]
     user = config["database"]["user"]
     pwd = config["database"]["password"]
+
+    print("Checking if data already exists in gene_stats table...")
+    check_gene_stats(db_host, db_port, db_name, user, pwd)
+    print("Checking if data already exists in gene_stats table... done\n")
 
     print("Validating input file...")
     validate_input_file(file)
