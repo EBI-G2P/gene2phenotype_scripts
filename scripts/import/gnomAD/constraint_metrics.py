@@ -8,7 +8,7 @@ import configparser
     Script to import gene constraints metrics data from gnomAD into the gene_stats table of a G2P database.
 
     Params:
-            --config : Config file name containing the database and API connection info (mandatory)
+            --config : Config file name containing the database connection info (mandatory)
                     File format is the following:
                         [database]
                         host = <>
@@ -16,9 +16,6 @@ import configparser
                         user = <>
                         password = <>
                         name = <>
-
-                        [api]
-                        api_url = <>
 
             --file : input file
                     Input file can be download from the URL: https://gnomad.broadinstitute.org/downloads#v4-constraint
@@ -177,7 +174,7 @@ def get_ensembl_data_from_g2p_db(
     )
     cursor = database.cursor()
 
-    cursor.execute(get_ensembl_to_locus_mapping_query, (ENSEMBL_SOURCE_NAME))
+    cursor.execute(get_ensembl_to_locus_mapping_query, (ENSEMBL_SOURCE_NAME,))
     data = cursor.fetchall()
     for row in data:
         ensembl_id, locus_id, locus = row
