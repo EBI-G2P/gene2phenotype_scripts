@@ -1,11 +1,8 @@
 """
-Install dependencies
-$ pip install --no-cache-dir google-genai
-
 Download G2P records and mined publications
 $ python gemini_publication_analyzer.py init g2p.json
 
-Process three publications
+Process 300 publications
 $ python gemini_publication_analyzer.py process --key_file key.json --limit 300 g2p.json
 """
 
@@ -180,7 +177,8 @@ You are assessing whether a scientific publication is relevant \
 to a Gene2Phenotype record defined by a gene and a disease. 
 Relevance means the publication provides or discusses evidence \
 that this gene is causally or mechanistically linked to this \
-disease in humans or relevant models.
+disease in humans or relevant models (e.g. mammalian or functional \
+models recapitulating the human phenotype).
 
 Output one of four labels:
 - high: the article directly supports or reports an association \
@@ -192,7 +190,8 @@ demonstrating a direct association between the two. \
 The disease context should still be similar \
 (e.g. same system or phenotype family).
 - low: the article discusses the gene or disease in an unrelated context, \
-or links the gene to a different disease than the one specified.
+or links the gene to a different disease than the one specified or focuses on \
+a different gene.
 - disputed: The article provides evidence that contradicts or disproves \
 an association between the specified gene and the specified disease.
 
@@ -202,13 +201,16 @@ NEVER assign "high" relevance unless \
 the publication provides evidence directly linking the gene to the \
 specific disease named in the record.
 If the article discusses a different disease caused by the same gene: \
-- If the diseases share overlapping molecular mechanisms, assign "medium"; \
+- If the diseases share overlapping molecular mechanisms and phenotypes, assign "medium"; \
 - If they do not, assign "low".
 Consider whether the molecular mechanism described in the publication \
-(e.g. gain or loss of function) matches the mechanism in the record (if available) when assessing similarity.
+(e.g. gain or loss of function) matches the mechanism in the record (if available) \
+when assessing similarity.
 If the publication or the record do not mention a molecular mechanism, base your \
 decision on the gene–disease association itself (e.g. clinical or genetic evidence). \
 Do not lower relevance solely because the mechanism is unspecified.
+If the publication discusses multiple genes or structural variants involving \
+the specified gene then assign "low" relevance.
 
 Input:
 Gene: {record['gene']}
@@ -217,8 +219,6 @@ Title: {article['title']}
 Abstract: {article['abstract']}
 Journal: {article['journal']}\
 """
-    # Note: variants now are VUS - these are relevant for records that are now disputed/refuted
-
     if "mechanism" in record:
         prompt += "\nMolecular mechanism: "+record['mechanism']
 
