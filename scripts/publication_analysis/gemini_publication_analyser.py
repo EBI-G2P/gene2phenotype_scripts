@@ -1,9 +1,9 @@
 """
 Download G2P records and mined publications
-$ python gemini_publication_analyzer.py init g2p.json
+$ python gemini_publication_analyser.py init g2p_records.json
 
 Process 300 publications
-$ python gemini_publication_analyzer.py process --key_file key.json --limit 300 g2p.json
+$ python gemini_publication_analyser.py process --key_file key.json --limit 300 g2p_records.json
 """
 
 import argparse
@@ -11,6 +11,7 @@ import csv
 import json
 import sys
 import time
+import os
 from enum import Enum
 from html.parser import HTMLParser
 from io import StringIO
@@ -79,6 +80,13 @@ def main():
 
 
 def run_download(args):
+    """
+    Calls method to download the G2P records.
+    Writes the records to a json file.
+    """
+    if args.output.is_file():
+       sys.exit(f"File '{args.output}' already exists")
+
     with args.output.open("wt") as fh:
         records = download_g2p()
         json.dump(records, fh, indent=2)
@@ -342,6 +350,10 @@ class PlainTextExtractor(HTMLParser):
 
 
 def download_g2p() -> list[dict]:
+    """
+    Method to download the G2P data from the API.
+    It returns a list of all G2P records.
+    """
     records = []
 
     # TODO: update to live site when data is released
