@@ -222,6 +222,7 @@ the specified gene then assign "low" relevance.
 
 Input:
 Gene: {record['gene']}
+Previous gene symbols: {record['previous_gene_symbols']}
 Disease: {record['disease']}
 Title: {article['title']}
 Abstract: {article['abstract']}
@@ -386,6 +387,7 @@ def download_g2p() -> list[dict]:
         record_to_append = {
                 "id": obj["g2p id"],
                 "gene": obj["gene symbol"],
+                "previous_gene_symbols": obj["previous gene symbols"],
                 "disease": obj["disease name"],
                 "confidence": obj["confidence"],
                 "publications": publications,
