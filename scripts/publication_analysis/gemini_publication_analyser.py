@@ -357,8 +357,8 @@ def download_g2p() -> list[dict]:
     """
     records = []
 
-    # TODO: update to live site when data is released
-    url = "https://wwwdev.ebi.ac.uk/gene2phenotype/api/panel/dd/download/"
+    # Download the DD data from the live API
+    url = "https://www.ebi.ac.uk/gene2phenotype/api/panel/dd/download/"
     with urlopen(url) as res:
         data = res.read().decode("utf-8")
 
