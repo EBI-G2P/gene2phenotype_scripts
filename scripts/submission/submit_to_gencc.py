@@ -33,175 +33,84 @@ confidence_category = {
 }
 
 
-def fetch_g2p_records(data: dict[str, Any]) -> requests.Response:
+def fetch_g2p_records(data: dict[str, Any]) -> list:
     """
-    Fetches the G2P record using all the panels download
+    Fetches the G2P record using download for all panels.
     User is not authenticated to ensure only visible panels are downloaded
 
     Args:
         data (dict[str, Any]): The DB and API configuration dictionary
 
     Returns:
-        requests.Response: The response object from the get request
+        list: The list reader
     """
-    fetch_g2p_records = "panel/all/download/"
-
-    url = data["api_url"] + fetch_g2p_records
+    url = f"{data['api_url'].rstrip('/')}/panel/all/download/"
     response = requests.get(url)
 
     if response.status_code == 200:
-        return response
+        csv_content = io.StringIO(response.content.decode("utf-8"))
+        reader = csv.DictReader(csv_content)
+        return list(reader)
 
     else:
-        sys.exit("Issues downloading the file")
+        sys.exit(f"Issues downloading the G2P file from {url}")
 
 
-def reading_data(response: requests.Response) -> list:
+def get_unsubmitted_records(data: dict[str, Any]) -> list:
     """
-    Reads the data from the response and converts it to a csv.DictReader
-
-    Args:
-        response (requests.Response): The response object from the get request
-
-    Returns:
-        list: The list reader
-    """
-    csv_content = io.StringIO(response.content.decode("utf-8"))
-    reader = csv.DictReader(csv_content)
-
-    return list(reader)
-
-
-def get_unsubmitted_record(data: dict[str, Any]) -> list:
-    """Gets the unsubmitted records from the API
+    Gets the G2P records that haven't been submitted to GenCC yet.
 
     Args:
         data (dict[str, Any]): DB and API configuration dictionary
 
     Returns:
-        list: Returns a list of unsubmitted ids
+        list: Returns a list of unsubmitted record ids
     """
-    fetch_unsubmitted_record = "unsubmitted_stable_ids/"
-
-    url = data["api_url"] + fetch_unsubmitted_record
+    url = f"{data['api_url'].rstrip('/')}/unsubmitted_stable_ids/"
     response = requests.get(url)
     if response.status_code == 200:
         unsubmitted = json.loads(response.content)
         return unsubmitted
     else:
-        sys.exit("Could not fetch unsubmitted records from API")
+        sys.exit(f"Could not fetch unsubmitted records from {url}")
 
 
-def get_later_review_date(data: dict[str, Any]) -> list:
-    """Gets later review date
-
-    Args:
-        data (dict[str, Any]): DB/api configuration
-
-    Returns:
-        list: Containing submission ids
+def get_updated_records(data: dict[str, Any]) -> dict:
     """
-    fetch_later_review_date = "later_review_date/"
-
-    url = data["api_url"] + fetch_later_review_date
-    response = requests.get(url)
-    if response.status_code == 200:
-        later_date = json.loads(response.content)
-        return later_date["ids"]
-    else:
-        sys.exit("Could not fetch later review date from API")
-
-
-def get_stable_id_associated_with_the_submission(
-    data: dict[str, Any], submission_id: str
-) -> str:
-    """Gets stable ids associated with the submissions
+    Gets G2P records that have been udpated since last GenCC submission
 
     Args:
         data (dict[str, Any]): DB/API configuration
-        submission_id (str): Submission id
 
     Returns:
-        str: Stable id strings which would be used in comparison
+        dict: Dictionary containing records that have been udpated since last submission
     """
-
-    fetch_record_data = f"submissions/{submission_id}"
-
-    url = data["api_url"] + fetch_record_data
-
+    url = f"{data['api_url'].rstrip('/')}/later_review_date/"
     response = requests.get(url)
     if response.status_code == 200:
-        stable_id = json.loads(response.content)
-        return stable_id[0]
+        response_data = json.loads(response.content)
+        return response_data
     else:
-        sys.exit(
-            f"Could not get the G2P stable ID associated with submission {submission_id}"
-        )
+        sys.exit(f"Could not fetch updated records from {url}")
 
 
-def read_from_old_gencc_submission(file: str) -> list:
-    """Read from old GenCC submission txt file
-
-    Args:
-        file (str): File name
-
-    Returns:
-        list: The list of data
+def get_deleted_records(data: dict[str, Any]) -> dict:
     """
-    with open(file, "r", encoding="utf-8") as opened:
-        reader = csv.DictReader(opened, delimiter="\t")
-        data = list(reader)
-
-    return data
-
-
-def compare_data_changes(
-    old_reader: list, later_date_ids: list, new_reader: list, data: dict[str, Any]
-) -> list:
-    """Compare data changes between what has been submitted and what is about to be unsubmitted for submission with later review date
+    Gets G2P records that have been submitted to GenCC but are now deleted in G2P
 
     Args:
-        old_reader (list): Old file data
-        later_date_ids (list): The later date ids
-        new_reader (list): New G2P file data
         data (dict[str, Any]): DB/API configuration
 
     Returns:
-        list: List of data that has had changes.
+        dict: Dictionary containing records that have been udpated since last submission
     """
-    updated_data = []
-
-    new_data_lookup = {row["g2p id"]: row for row in new_reader}
-    for old_row in old_reader:
-        submission_id = old_row["submission_id"]
-        if submission_id not in later_date_ids:
-            continue
-
-        stable_id = get_stable_id_associated_with_the_submission(data, submission_id)
-        new_row = new_data_lookup.get(stable_id)
-
-        if not new_row:
-            continue
-
-        if new_row.get("disease mim") != old_row.get("disease id") and new_row.get(
-            "disease MONDO"
-        ) != old_row.get("disease id"):
-            new_row["update"] = 1
-            updated_data.append(new_row)
-        elif new_row.get("disease name") != old_row.get("disease name"):
-            new_row["update"] = 1
-            updated_data.append(new_row)
-        elif new_row.get("allelic requirement") != old_row.get("moi_name"):
-            new_row["update"] = 1
-            updated_data.append(new_row)
-        elif new_row.get("confidence category") != old_row.get("classification_name"):
-            new_row["update"] = 1
-            updated_data.append(new_row)
-        elif new_row.get("publications") != old_row.get("pmids"):
-            new_row["update"] = 1
-            updated_data.append(new_row)
-
-    return updated_data
+    url = f"{data['api_url'].rstrip('/')}/gencc_deleted_records/"
+    response = requests.get(url)
+    if response.status_code == 200:
+        response_data = json.loads(response.content)
+        return response_data
+    else:
+        sys.exit(f"Could not fetch deleted records from {url}")
 
 
 def post_gencc_submission(list_of_data: list, db_config: dict[str, Any]):
@@ -240,7 +149,8 @@ def post_gencc_submission(list_of_data: list, db_config: dict[str, Any]):
 
 
 def write_to_the_GenCC_file(
-    data: list, outfile: str, write_to_db: bool, type_of: str = None
+    records_data: list,
+    outfile: str
 ) -> str:
     """
     Write the records to be submitted to the output file 'G2P_GenCC.txt'.
@@ -248,71 +158,80 @@ def write_to_the_GenCC_file(
     to file 'record_with_issues.txt'.
 
     Args:
-        data (dict[str, Any]): Record of unsubmitted ids
+        records_data (dict[str, Any]): Record of unsubmitted ids
         outfile (str): Txt file to be created
-        write_to_db (bool): Writes submission details to the db (table 'gencc_submission')
-        type_of (str): If not provided, it is set to None
 
     Returns:
         outfile (str): The output file with records to be submitted
         gencc_list (list): list of records to write to the db
     """
-    with open(outfile, mode="w") as output_file:
-        output_file.write(
-            "submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate\tpublic_report_url\tnotes\tpmids\tassertion_criteria_url\n"
+    with open(outfile, mode="w") as rw:
+        rw.write(
+            "submission_id\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name"
+            "\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate"
+            "\tpublic_report_url\tnotes\tpmids\tassertion_criteria_url\n"
         )
-        issues_with_record = []
+        issues_with_record = {}
         gencc_list = []
         submission_id_base = "1000112"
-        for record in data:
+        submitter_id = "GENCC:000112"
+        submitter_name = "TGMI"  # To be updated in the future
+        assertion_criteria_url = "https://www.ebi.ac.uk/gene2phenotype/about/terminology"
+
+        for record in records_data:
             g2p_id = record["g2p id"]
-            submission_id = (
-                submission_id_base + str(g2p_id[3:])
-                if not record.get("submission_id")
-                else record.get("submission_id")
-            )
+
+            # Prepare submission ID
+            # Create a new submission ID if it's a new record
+            if "type_of_submission" not in record or record["type_of_submission"] == "create":
+                submission_id = submission_id_base + str(g2p_id[3:]) # TODO: review
+                type_of_submission = "create" # new records don't always have the key 'type_of_submission'
+            else:
+                submission_id = record["submission_id"]
+                type_of_submission = record["type_of_submission"]
 
             hgnc_id = record["hgnc id"]
             hgnc_symbol = record["gene symbol"]
 
             disease_id = record["disease mim"] or record["disease MONDO"]
+            # We cannot submit records without disease ID
             if disease_id is None or disease_id == "":
-                issues_with_record.append(g2p_id)
+                issues_with_record[g2p_id] = "Missing disease ID"
                 continue
+
             disease_name = record["disease name"]
-            moi_id = allelic_requirement[record["allelic requirement"]]
+
+            if record["allelic requirement"] in allelic_requirement:
+                moi_id = allelic_requirement[record["allelic requirement"]]
+            else:
+                issues_with_record[g2p_id] = f"Unsupported allelic requirement '{record['allelic requirement']}'"
+                continue
+
             moi_name = record["allelic requirement"]
-            submitter_id = "GENCC:000112"
-            submitter_name = "TGMI"  # To be updated in the future
             classification_id = confidence_category[record["confidence"]]
             classification_name = record["confidence"]
             dt = datetime.fromisoformat(record["date of last review"])
             date = dt.strftime("%Y/%m/%d")
             record_url = "https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id
             pmids = record["publications"]
-            assertion_criteria_url = (
-                "https://www.ebi.ac.uk/gene2phenotype/about/terminology"
-            )
 
             line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t\t{pmids}\t{assertion_criteria_url}\n"
-            output_file.write(line_to_output)
+            rw.write(line_to_output)
             db_date = create_datetime_now()
-            if write_to_db:
-                if not type_of:
-                    # TODO: fix bug
-                    type_of = "update" if record.get("update") == 1 else "create"
-                gencc_list.append(
-                    {
-                        "submission_id": submission_id,
-                        "date_of_submission": db_date,
-                        "type_of_submission": type_of,
-                        "g2p_stable_id": g2p_id,
-                    }
-                )
-    if len(issues_with_record) > 0:
+            
+            gencc_list.append(
+                {
+                    "submission_id": submission_id,
+                    "date_of_submission": db_date,
+                    "type_of_submission": type_of_submission,
+                    "g2p_stable_id": g2p_id,
+                }
+            )
+
+    if issues_with_record:
         with open("record_with_issues.txt", mode="w") as textfile:
-            for issues in issues_with_record:
-                textfile.write(f"{issues}\n")
+            for g2p_id in issues_with_record:
+                textfile.write(f"{g2p_id}\t{issues_with_record[g2p_id]}\n")
 
     return outfile, gencc_list
 
@@ -349,7 +268,8 @@ def convert_txt_to_excel(input_file: str, output_file: str):
 
 
 def read_from_config_file(config_file: str) -> dict[str, Any]:
-    """Reads from Configuration file (config.ini) and creates a dictionary of data
+    """
+    Reads the database and api info from the config file.
 
     Args:
         config_file (str): configuration file
@@ -398,36 +318,47 @@ def get_output_paths(path: str) -> Tuple[str, str]:
 
 
 def handle_existing_submission(
-    read_data: list,
+    g2p_data: list,
     output_file: str,
-    write_to_db: bool,
     db_config: dict[str, Any],
-    old_file: str,
-) -> write_to_the_GenCC_file:
+) -> None:
     """Handles existing submission.
 
     Args:
-        read_data (list): Data from the G2P all records file
+        g2p_data (list): Data from the G2P all records file
         output_file (str): Output text file where the submission will be written into
-        write_to_db (bool): If set to True, write submission details to the db
         db_config (dict[str, Any]): DB/API configuration
-        old_file (str) : Old file containing submitted GenCC submission to allow comparison
-
-    Returns:
-        write_to_the_GenCC_file: A text file containing all the records to be submitted to GenCC
     """
-    unsubmitted = get_unsubmitted_record(db_config)
-    # Retrieves unsubmitted records from the data from the file
-    common = [row for row in read_data if row["g2p id"] in unsubmitted]
+    # Retrieves the records that have been updated since last submission
+    # We only need to re-submit these if the disease name/IDs have changed
+    updated_records_data = get_updated_records(db_config)
+    # TODO: review the updated records
 
-    if old_file:
-        old_reader = read_from_old_gencc_submission(old_file)
-        later_review = get_later_review_date(db_config)
-        compared = compare_data_changes(old_reader, later_review, read_data, db_config)
-        merged_data = compared + common
-        return write_to_the_GenCC_file(merged_data, output_file, write_to_db)
-    else:
-        return write_to_the_GenCC_file(common, output_file, write_to_db, "create")
+    # Retrieves the records that have been deleted in G2P but were submitted to GenCC
+    deleted_records_data = get_deleted_records(db_config)
+
+    # List of records that haven't been submitted yet
+    # These records are part of public panels and are live in G2P (not deleted)
+    unsubmitted = get_unsubmitted_records(db_config)
+    # Retrieves the unsubmitted records data from the G2P downloaded file
+    records_to_submit = []
+
+    for row in g2p_data:
+        # Prepare unsubmitted records
+        if row["g2p id"] in unsubmitted:
+            row["type_of_submission"] = "create"
+            row["submission_id"] = None
+            records_to_submit.append(row)
+        if row["g2p id"] in list(updated_records_data["ids"].keys()):
+            row["type_of_submission"] = "update"
+            row["submission_id"] = updated_records_data["ids"][row["g2p id"]]
+            records_to_submit.append(row)
+
+    outfile, gencc_list = write_to_the_GenCC_file(records_to_submit, output_file)
+
+    # TODO: write deleted records to file
+
+    return outfile, gencc_list
 
 
 def main():
@@ -440,58 +371,39 @@ def main():
     )
     ap.add_argument("--config_file", required=True, help="G2P Configuration file")
     ap.add_argument(
-        "--write_to_db",
+        "--skip_write_to_db",
         required=False,
         action="store_true",
     )
     ap.add_argument(
-        "--new",
+        "--new_submission",
         action="store_true",
         required=False,
-        help="New is used to determine if this is a new or clean GenCC submission, so no checks on the submission id or stable id will be done",
-    )
-    ap.add_argument(
-        "--old_file",
-        required=False,
-        help="Old file to compare changes in G2P ids in txt format",
+        help="New is used to determine this is a new submission to GenCC",
     )
     args = ap.parse_args()
 
-    if args.new and args.old_file:
-        ap.error("Cannot use --new and --old_file at the same time.")
-
     db_config = read_from_config_file(args.config_file)
-    write_to_db = args.write_to_db
-    old_file = args.old_file
-
-    if old_file and not os.path.isfile(old_file):
-        sys.exit(f"Invalid file '{old_file}'")
+    skip_write_to_db = args.skip_write_to_db
 
     output_file, final_output_file = get_output_paths(args.path)
 
-    print("Downloading G2P files")
-    file_data = fetch_g2p_records(db_config)
+    print("Getting G2P records from the API")
+    g2p_data = fetch_g2p_records(db_config)
 
-    print("Reading data from downloaded file")
-    read_data = reading_data(file_data)
-
-    if args.new:
+    if args.new_submission:
         print("Handling new submission")
-        outfile, gencc_list = write_to_the_GenCC_file(
-            read_data, output_file, write_to_db, "create"
-        )
+        outfile, gencc_list = write_to_the_GenCC_file(g2p_data, output_file)
     else:
         print("Handling existing submission")
-        outfile, gencc_list = handle_existing_submission(
-            read_data, output_file, write_to_db, db_config, old_file
-        )
+        outfile, gencc_list = handle_existing_submission(g2p_data, output_file, db_config)
 
-    print("Converting text file to Excel file")
-    convert_txt_to_excel(outfile, final_output_file)
+    # print("Converting text file to Excel file")
+    # convert_txt_to_excel(outfile, final_output_file)
 
-    if write_to_db:
-        print("Writing submission details to the database")
-        post_gencc_submission(gencc_list, db_config)
+    # if not skip_write_to_db:
+    #     print("Writing submission details to the database")
+    #     post_gencc_submission(gencc_list, db_config)
 
 
 if __name__ == "__main__":
