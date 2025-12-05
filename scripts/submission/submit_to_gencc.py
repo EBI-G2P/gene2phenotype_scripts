@@ -150,7 +150,8 @@ def post_gencc_submission(list_of_data: list, db_config: dict[str, Any]):
 
 def write_to_the_GenCC_file(
     records_data: list,
-    outfile: str
+    outfile: str,
+    output_file_issues: str
 ) -> str:
     """
     Write the records to be submitted to the output file 'G2P_GenCC.txt'.
@@ -229,7 +230,7 @@ def write_to_the_GenCC_file(
             )
 
     if issues_with_record:
-        with open("record_with_issues.txt", mode="w") as textfile:
+        with open(output_file_issues, mode="w") as textfile:
             for g2p_id in issues_with_record:
                 textfile.write(f"{g2p_id}\t{issues_with_record[g2p_id]}\n")
 
@@ -292,34 +293,35 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
     return data
 
 
-def get_output_paths(path: str) -> Tuple[str, str]:
+def get_output_paths(path: str) -> Tuple[str, str, str]:
     """
-    Create the output directory and prepare the output file path.
+    Create the output directory and prepare the output files.
 
     Args:
         path (str): path where the G2P and GenCC files are going to be saved
 
     Returns:
-        Tuple[str, str]: output file (txt format) and final_output_file (xlsx format)
+        Tuple[str, str, str]: output files
     """
+    timestamp = create_datetime_now()
+
     if path:
-        timestamp = create_datetime_now()
         gencc_dir = os.path.join(path, timestamp)
-        os.makedirs(gencc_dir, exist_ok=True)  # to make the directory
-
-        output_file = os.path.join(gencc_dir, "G2P_GenCC.txt")
-        final_output_file = os.path.join(gencc_dir, "G2P_GenCC.xlsx")
     else:
-        # TODO: this should create the new directory too
-        output_file = "G2P_GenCC.txt"
-        final_output_file = "G2P_GenCC.xlsx"
+        gencc_dir = os.path.join(os.getcwd(), timestamp)
 
-    return output_file, final_output_file
+    os.makedirs(gencc_dir, exist_ok=True) # to make the directory
+    output_file_issues = os.path.join(gencc_dir, "records_with_issues.txt")
+    output_file = os.path.join(gencc_dir, "G2P_GenCC.txt")
+    final_output_file = os.path.join(gencc_dir, "G2P_GenCC.xlsx")
+
+    return output_file, final_output_file, output_file_issues
 
 
 def handle_existing_submission(
     g2p_data: list,
     output_file: str,
+    output_file_issues: str,
     db_config: dict[str, Any],
 ) -> None:
     """Handles existing submission.
@@ -354,7 +356,7 @@ def handle_existing_submission(
             row["submission_id"] = updated_records_data["ids"][row["g2p id"]]
             records_to_submit.append(row)
 
-    outfile, gencc_list = write_to_the_GenCC_file(records_to_submit, output_file)
+    outfile, gencc_list = write_to_the_GenCC_file(records_to_submit, output_file, output_file_issues)
 
     # TODO: write deleted records to file
 
@@ -386,20 +388,20 @@ def main():
     db_config = read_from_config_file(args.config_file)
     skip_write_to_db = args.skip_write_to_db
 
-    output_file, final_output_file = get_output_paths(args.path)
+    output_file, final_output_file, output_file_issues = get_output_paths(args.path)
 
     print("Getting G2P records from the API")
     g2p_data = fetch_g2p_records(db_config)
 
     if args.new_submission:
         print("Handling new submission")
-        outfile, gencc_list = write_to_the_GenCC_file(g2p_data, output_file)
+        outfile, gencc_list = write_to_the_GenCC_file(g2p_data, output_file, output_file_issues)
     else:
         print("Handling existing submission")
-        outfile, gencc_list = handle_existing_submission(g2p_data, output_file, db_config)
+        outfile, gencc_list = handle_existing_submission(g2p_data, output_file, output_file_issues, db_config)
 
-    # print("Converting text file to Excel file")
-    # convert_txt_to_excel(outfile, final_output_file)
+    print("Converting text file to Excel file")
+    convert_txt_to_excel(outfile, final_output_file)
 
     # if not skip_write_to_db:
     #     print("Writing submission details to the database")
