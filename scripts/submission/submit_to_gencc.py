@@ -179,17 +179,22 @@ def write_to_the_GenCC_file(
         gencc_list = []
         submission_id_base = "1000112"
         submitter_id = "GENCC:000112"
-        submitter_name = "TGMI" # To be updated in the future
-        assertion_criteria_url = "https://www.ebi.ac.uk/gene2phenotype/about/terminology"
+        submitter_name = "TGMI"  # To be updated in the future
+        assertion_criteria_url = (
+            "https://www.ebi.ac.uk/gene2phenotype/about/terminology"
+        )
 
         for record in records_data:
             g2p_id = record["g2p id"]
 
             # Prepare submission ID
             # Create a new submission ID if it's a new record
-            if "type_of_submission" not in record or record["type_of_submission"] == "create":
+            if (
+                "type_of_submission" not in record
+                or record["type_of_submission"] == "create"
+            ):
                 submission_id = submission_id_base + str(g2p_id[3:])
-                type_of_submission = "create" # new records don't always have the key 'type_of_submission'
+                type_of_submission = "create"  # new records don't always have the key 'type_of_submission'
             else:
                 submission_id = record["submission_id"]
                 type_of_submission = record["type_of_submission"]
@@ -208,7 +213,9 @@ def write_to_the_GenCC_file(
             if record["allelic requirement"] in allelic_requirement:
                 moi_id = allelic_requirement[record["allelic requirement"]]
             else:
-                issues_with_record[g2p_id] = f"Unsupported allelic requirement '{record['allelic requirement']}'"
+                issues_with_record[g2p_id] = (
+                    f"Unsupported allelic requirement '{record['allelic requirement']}'"
+                )
                 continue
 
             moi_name = record["allelic requirement"]
@@ -222,7 +229,7 @@ def write_to_the_GenCC_file(
             line_to_output = f"{submission_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t\t{pmids}\t{assertion_criteria_url}\n"
             rw.write(line_to_output)
             db_date = create_datetime_now()
-            
+
             gencc_list.append(
                 {
                     "submission_id": submission_id,
@@ -308,16 +315,16 @@ def prepapre_output_files(path: str) -> Tuple[Path, Path, Path, Path]:
     """
     timestamp = create_datetime_now()
     base_dir = Path(path) if path else Path.cwd()
-    gencc_dir = base_dir/timestamp
+    gencc_dir = base_dir / timestamp
     gencc_dir.mkdir(parents=True, exist_ok=True)
     # File to save records that cannot be submitted due to issues
-    output_file_issues = gencc_dir/"records_with_issues.txt"
+    output_file_issues = gencc_dir / "records_with_issues.txt"
     # File to save records that are going to be submitted
-    output_file = gencc_dir/"G2P_GenCC.txt"
+    output_file = gencc_dir / "G2P_GenCC.txt"
     # File to save records that have been deleted in G2P
-    output_file_deleted = gencc_dir/"G2P_GenCC_deleted_records.txt"
+    output_file_deleted = gencc_dir / "G2P_GenCC_deleted_records.txt"
     # File to save records that are going to be submitted (expected format for GenCC)
-    final_output_file = gencc_dir/"G2P_GenCC.xlsx"
+    final_output_file = gencc_dir / "G2P_GenCC.xlsx"
 
     return output_file, final_output_file, output_file_issues, output_file_deleted
 
@@ -363,15 +370,17 @@ def handle_existing_submission(
             row["submission_id"] = updated_records_data["ids"][row["g2p id"]]
             records_to_submit.append(row)
 
-    outfile, gencc_list = write_to_the_GenCC_file(records_to_submit, output_file, output_file_issues)
+    outfile, gencc_list = write_to_the_GenCC_file(
+        records_to_submit, output_file, output_file_issues
+    )
 
     # Write deleted records to a separate file
     with open(output_file_deleted, mode="w") as rw:
-        rw.write(
-            "assertion_criteria_url\n"
-        )
+        rw.write("assertion_criteria_url\n")
         for deleted_record in deleted_records_data["ids"]:
-            rw.write("https://www.ebi.ac.uk/gene2phenotype/lgd/" + deleted_record + "\n")
+            rw.write(
+                "https://www.ebi.ac.uk/gene2phenotype/lgd/" + deleted_record + "\n"
+            )
 
     return outfile, gencc_list
 
@@ -401,17 +410,23 @@ def main():
     db_config = read_from_config_file(args.config_file)
     skip_write_to_db = args.skip_write_to_db
 
-    output_file, final_output_file, output_file_issues, output_file_deleted = prepapre_output_files(args.path)
+    output_file, final_output_file, output_file_issues, output_file_deleted = (
+        prepapre_output_files(args.path)
+    )
 
     print("Getting G2P records from the API")
     g2p_data = fetch_g2p_records(db_config)
 
     if args.new_submission:
         print("Handling new submission")
-        outfile, gencc_list = write_to_the_GenCC_file(g2p_data, output_file, output_file_issues)
+        outfile, gencc_list = write_to_the_GenCC_file(
+            g2p_data, output_file, output_file_issues
+        )
     else:
         print("Handling existing submission")
-        outfile, gencc_list = handle_existing_submission(g2p_data, output_file, output_file_issues, output_file_deleted, db_config)
+        outfile, gencc_list = handle_existing_submission(
+            g2p_data, output_file, output_file_issues, output_file_deleted, db_config
+        )
 
     print("Converting text file to Excel file")
     convert_txt_to_excel(outfile, final_output_file)
