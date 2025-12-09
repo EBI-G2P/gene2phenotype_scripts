@@ -154,7 +154,7 @@ def write_to_the_GenCC_file(
     records_data: list,
     outfile: Path,
     output_file_issues: Path,
-) -> str:
+) -> Tuple[Path, list]:
     """
     Write the records to be submitted to the output file 'G2P_GenCC.txt'.
     Records without disease id are excluded from the submission and written
@@ -240,7 +240,7 @@ def write_to_the_GenCC_file(
             )
 
     if issues_with_record:
-        with open(output_file_issues, mode="w") as textfile:
+        with open(output_file_issues, mode="a") as textfile:
             for g2p_id in issues_with_record:
                 textfile.write(f"{g2p_id}\t{issues_with_record[g2p_id]}\n")
 
@@ -303,44 +303,38 @@ def read_from_config_file(config_file: str) -> dict[str, Any]:
     return data
 
 
-def prepapre_output_files(path: str) -> Tuple[Path, Path, Path, Path]:
+def prepare_output_dir(path: str) -> Path:
     """
-    Create the output directory and prepare the output files.
+    Create the output directory where files are going to be written.
 
     Args:
         path (str): path where the G2P and GenCC files are going to be saved
 
     Returns:
-        Tuple[Path, Path, Path, Path]: output files
+        Path: output directory
     """
     timestamp = create_datetime_now()
     base_dir = Path(path) if path else Path.cwd()
     gencc_dir = base_dir / timestamp
     gencc_dir.mkdir(parents=True, exist_ok=True)
-    # File to save records that cannot be submitted due to issues
-    output_file_issues = gencc_dir / "records_with_issues.txt"
-    # File to save records that are going to be submitted
-    output_file = gencc_dir / "G2P_GenCC.txt"
-    # File to save records that have been deleted in G2P
-    output_file_deleted = gencc_dir / "G2P_GenCC_deleted_records.txt"
-    # File to save records that are going to be submitted (expected format for GenCC)
-    final_output_file = gencc_dir / "G2P_GenCC.xlsx"
 
-    return output_file, final_output_file, output_file_issues, output_file_deleted
+    return gencc_dir
 
 
 def handle_existing_submission(
     g2p_data: list,
     output_file: Path,
+    output_file_updated: Path,
     output_file_issues: Path,
     output_file_deleted: Path,
     db_config: dict[str, Any],
-) -> None:
+) -> Tuple[Path, Path, list]:
     """Handles existing submission.
 
     Args:
         g2p_data (list): Data from the G2P all records file
         output_file (Path): Output text file where the submission will be written into
+        output_file_updated (Path): Output text file where the updated records will be written into
         output_file_issues (Path): Output text file where the records with issues will be written into
         output_file_deleted (Path): Output text file where the records that have been deleted in G2P will be written into
         db_config (dict[str, Any]): DB/API configuration
@@ -358,6 +352,8 @@ def handle_existing_submission(
     unsubmitted = get_unsubmitted_records(db_config)
     # Retrieves the unsubmitted records data from the G2P downloaded file
     records_to_submit = []
+    updated_records_to_submit = []
+    gencc_list = []
 
     for row in g2p_data:
         # Prepare unsubmitted records
@@ -368,21 +364,28 @@ def handle_existing_submission(
         if row["g2p id"] in list(updated_records_data["ids"].keys()):
             row["type_of_submission"] = "update"
             row["submission_id"] = updated_records_data["ids"][row["g2p id"]]
-            records_to_submit.append(row)
+            updated_records_to_submit.append(row)
 
-    outfile, gencc_list = write_to_the_GenCC_file(
+    # Write the new G2P records to submit to the GenCC file
+    outfile, gencc_list_new = write_to_the_GenCC_file(
         records_to_submit, output_file, output_file_issues
     )
 
+    # Write the updated records to a separate file
+    outfile_updated_records, gencc_list_updated = write_to_the_GenCC_file(
+        updated_records_to_submit, output_file_updated, output_file_issues
+    )
+
+    gencc_list = gencc_list_new + gencc_list_updated
+
     # Write deleted records to a separate file
     with open(output_file_deleted, mode="w") as rw:
-        rw.write("assertion_criteria_url\n")
         for deleted_record in deleted_records_data["ids"]:
             rw.write(
                 "https://www.ebi.ac.uk/gene2phenotype/lgd/" + deleted_record + "\n"
             )
 
-    return outfile, gencc_list
+    return outfile, outfile_updated_records, gencc_list
 
 
 def main():
@@ -403,33 +406,47 @@ def main():
         "--new_submission",
         action="store_true",
         required=False,
-        help="New is used to determine this is a new submission to GenCC",
+        help="Option to determine it is a new submission to GenCC",
     )
     args = ap.parse_args()
 
     db_config = read_from_config_file(args.config_file)
     skip_write_to_db = args.skip_write_to_db
 
-    output_file, final_output_file, output_file_issues, output_file_deleted = (
-        prepapre_output_files(args.path)
-    )
+    # Prepare output directory
+    gencc_dir = prepare_output_dir(args.path)
+    # File to save records that cannot be submitted due to issues
+    output_file_issues = gencc_dir / "records_with_issues.txt"
+    # File to save records that are going to be submitted
+    output_file = gencc_dir / "G2P_GenCC.txt"
+    # File to save records that are going to be submitted as updates
+    output_file_updated = gencc_dir / "G2P_GenCC_updated_records.txt"
+    # File to save records that have been deleted in G2P
+    output_file_deleted = gencc_dir / "G2P_GenCC_deleted_records.txt"
+    # File to save records that are going to be submitted (expected format for GenCC)
+    final_output_file = gencc_dir / "G2P_GenCC.xlsx"
+    # File to save records that are going to be re-submitted (expected format for GenCC)
+    final_output_file_updated = gencc_dir / "G2P_GenCC_updated_records.xlsx"
 
     print("Getting G2P records from the API")
     g2p_data = fetch_g2p_records(db_config)
 
     if args.new_submission:
         print("Handling new submission")
+        # A new submission means that all records are going to be submitted
+        # for the first time
         outfile, gencc_list = write_to_the_GenCC_file(
             g2p_data, output_file, output_file_issues
         )
     else:
         print("Handling existing submission")
-        outfile, gencc_list = handle_existing_submission(
-            g2p_data, output_file, output_file_issues, output_file_deleted, db_config
+        outfile, outfile_updated_records, gencc_list = handle_existing_submission(
+            g2p_data, output_file, output_file_updated, output_file_issues, output_file_deleted, db_config
         )
 
     print("Converting text file to Excel file")
     convert_txt_to_excel(outfile, final_output_file)
+    convert_txt_to_excel(outfile_updated_records, final_output_file_updated)
 
     if not skip_write_to_db:
         print("Writing submission details to the database")
