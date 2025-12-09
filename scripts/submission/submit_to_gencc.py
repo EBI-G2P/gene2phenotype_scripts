@@ -115,7 +115,7 @@ def get_deleted_records(data: dict[str, Any]) -> dict:
         sys.exit(f"Could not fetch deleted records from {url}")
 
 
-def post_gencc_submission(list_of_data: list, db_config: dict[str, Any]):
+def post_gencc_submission(list_of_data: list, db_config: dict[str, Any]) -> None:
     """
     Calls the G2P API to write to the db which records are going to be submitted to GenCC.
 
@@ -124,27 +124,27 @@ def post_gencc_submission(list_of_data: list, db_config: dict[str, Any]):
         db_config (dict[str, Any]): dictionary with the database connection details and the API URL
 
     """
-    create_url = "gencc_create/"
-    login_url = "login/"
+    create_url = f"{db_config['api_url'].rstrip('/')}/gencc_create/"
+    login_url = f"{db_config['api_url'].rstrip('/')}/login/"
 
     login_info = {
         "username": db_config["username"],
         "password": db_config["api_password"],
     }
 
-    response = requests.post(db_config["api_url"] + login_url, json=login_info)
+    response = requests.post(login_url, json=login_info)
     if response.status_code == 200:
         try:
             response_create = requests.post(
-                db_config["api_url"] + create_url,
+                create_url,
                 json=list_of_data,
                 cookies=response.cookies,
             )
             if response_create.status_code in (200, 201):
-                print(f"GenCC submission for the records was created successfully")
+                print("GenCC submission created successfully")
             else:
                 sys.exit(
-                    f"Issues creating the submissions {response_create.status_code} {response_create.json}"
+                    f"Issues while creating the submissions {response_create.status_code}: {response_create.json}"
                 )
         except Exception as e:
             sys.exit("Error:", e)
