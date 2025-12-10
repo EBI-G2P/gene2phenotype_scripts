@@ -96,6 +96,57 @@ def get_updated_records(data: dict[str, Any]) -> dict:
         sys.exit(f"Could not fetch updated records from {url}")
 
 
+def filter_updated_records(old_file, g2p_data, updated_records_data) -> dict:
+    """
+    Filter the updated records using the old file submitted to GenCC.
+    The relevant updates are those where disease IDs and confidence values have changed.
+    Returns a list of records that need to be re-submitted.
+
+    Args:
+        old_file (Path): Previous file submitted to GenCC
+        g2p_data (list): Data from the G2P all records file
+        updated_records_data (dict): Dictionary containing records that have been udpated in G2P since last submission
+
+    Returns:
+        dict: Dictionary containing records that need to be re-submitted
+    """
+    # Prepare output struture
+    updated_records_data_filtered = {
+        "count": 0,
+        "ids": {},
+    }
+
+    # Format G2P data for easier access
+    g2p_ids_dict = {}
+    for row in g2p_data:
+        g2p_ids_dict[row["g2p id"]] = row
+
+    # Read file from previous submission and prepare a dictionary for easier access
+    old_records = {}
+    with open(old_file, mode="r") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            old_records[row["submission_id"]] = row
+
+    for g2p_id in updated_records_data["ids"]:
+        submission_id = updated_records_data["ids"][g2p_id]
+        if submission_id in old_records:
+            old_record = old_records[submission_id]
+            # Check disease ID and confidence
+            old_disease_id = old_record["disease_id"]
+            new_disease_id_mim = g2p_ids_dict[g2p_id]["disease mim"]
+            new_disease_id_mondo = g2p_ids_dict[g2p_id]["disease MONDO"]
+            old_confidence = old_record["classification_name"]
+            new_confidence = g2p_ids_dict[g2p_id]["confidence"]
+
+            if (((new_disease_id_mim or new_disease_id_mondo) and (old_disease_id != new_disease_id_mim and old_disease_id != new_disease_id_mondo))
+                or old_confidence != new_confidence):
+                updated_records_data_filtered["ids"][g2p_id] = submission_id
+                updated_records_data_filtered["count"] += 1
+
+    return updated_records_data_filtered
+
+
 def get_deleted_records(data: dict[str, Any]) -> dict:
     """
     Gets G2P records that have been submitted to GenCC but are now deleted in G2P
@@ -327,9 +378,13 @@ def handle_existing_submission(
     output_file_updated: Path,
     output_file_issues: Path,
     output_file_deleted: Path,
+    old_file: Path,
     db_config: dict[str, Any],
 ) -> Tuple[Path, Path, list]:
-    """Handles existing submission.
+    """
+    Method to generate the files for a new submission to GenCC.
+    Some records are new, others might have been updated since last submission
+    and others might have been deleted in G2P.
 
     Args:
         g2p_data (list): Data from the G2P all records file
@@ -337,12 +392,15 @@ def handle_existing_submission(
         output_file_updated (Path): Output text file where the updated records will be written into
         output_file_issues (Path): Output text file where the records with issues will be written into
         output_file_deleted (Path): Output text file where the records that have been deleted in G2P will be written into
+        old_file (Path): Previous file submitted to GenCC
         db_config (dict[str, Any]): DB/API configuration
     """
     # Retrieves the records that have been updated since last submission
     # We only need to re-submit these if the disease name/IDs have changed
     updated_records_data = get_updated_records(db_config)
-    # TODO: review the updated records
+    # Review the updated records using the file from the previous submission ('old_file')
+    # We only re-submit records where disease IDs or confidence have changed
+    updated_records_data_final = filter_updated_records(old_file, g2p_data, updated_records_data)
 
     # Retrieves the records that have been deleted in G2P but were submitted to GenCC
     deleted_records_data = get_deleted_records(db_config)
@@ -361,9 +419,9 @@ def handle_existing_submission(
             row["type_of_submission"] = "create"
             row["submission_id"] = None
             records_to_submit.append(row)
-        if row["g2p id"] in list(updated_records_data["ids"].keys()):
+        if row["g2p id"] in list(updated_records_data_final["ids"].keys()):
             row["type_of_submission"] = "update"
-            row["submission_id"] = updated_records_data["ids"][row["g2p id"]]
+            row["submission_id"] = updated_records_data_final["ids"][row["g2p id"]]
             updated_records_to_submit.append(row)
 
     # Write the new G2P records to submit to the GenCC file
@@ -408,7 +466,19 @@ def main():
         required=False,
         help="Option to determine it is a new submission to GenCC",
     )
+    ap.add_argument(
+        "--old_file",
+        required=False,
+        type=Path,
+        help="Previous file submitted to GenCC",
+    )
     args = ap.parse_args()
+
+    if args.new_submission and args.old_file:
+        ap.error("Cannot use --new_submission and --old_file at the same time.")
+
+    if args.old_file and not os.path.isfile(args.old_file):
+        sys.exit(f"Invalid file '{args.old_file}'")
 
     db_config = read_from_config_file(args.config_file)
     skip_write_to_db = args.skip_write_to_db
@@ -441,7 +511,7 @@ def main():
     else:
         print("Handling existing submission")
         outfile, outfile_updated_records, gencc_list = handle_existing_submission(
-            g2p_data, output_file, output_file_updated, output_file_issues, output_file_deleted, db_config
+            g2p_data, output_file, output_file_updated, output_file_issues, output_file_deleted, args.old_file, db_config
         )
 
     print("Converting text file to Excel file")
