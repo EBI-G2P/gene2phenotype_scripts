@@ -139,8 +139,13 @@ def filter_updated_records(old_file, g2p_data, updated_records_data) -> dict:
             old_confidence = old_record["classification_name"]
             new_confidence = g2p_ids_dict[g2p_id]["confidence"]
 
-            if (((new_disease_id_mim or new_disease_id_mondo) and (old_disease_id != new_disease_id_mim and old_disease_id != new_disease_id_mondo))
-                or old_confidence != new_confidence):
+            if (
+                (new_disease_id_mim or new_disease_id_mondo)
+                and (
+                    old_disease_id != new_disease_id_mim
+                    and old_disease_id != new_disease_id_mondo
+                )
+            ) or old_confidence != new_confidence:
                 updated_records_data_filtered["ids"][g2p_id] = submission_id
                 updated_records_data_filtered["count"] += 1
 
@@ -400,7 +405,9 @@ def handle_existing_submission(
     updated_records_data = get_updated_records(db_config)
     # Review the updated records using the file from the previous submission ('old_file')
     # We only re-submit records where disease IDs or confidence have changed
-    updated_records_data_final = filter_updated_records(old_file, g2p_data, updated_records_data)
+    updated_records_data_final = filter_updated_records(
+        old_file, g2p_data, updated_records_data
+    )
 
     # Retrieves the records that have been deleted in G2P but were submitted to GenCC
     deleted_records_data = get_deleted_records(db_config)
@@ -511,7 +518,13 @@ def main():
     else:
         print("Handling existing submission")
         outfile, outfile_updated_records, gencc_list = handle_existing_submission(
-            g2p_data, output_file, output_file_updated, output_file_issues, output_file_deleted, args.old_file, db_config
+            g2p_data,
+            output_file,
+            output_file_updated,
+            output_file_issues,
+            output_file_deleted,
+            args.old_file,
+            db_config,
         )
 
     print("Converting text file to Excel file")
