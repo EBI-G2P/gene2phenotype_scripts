@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 
+import argparse
+import configparser
 import os.path
 import sys
-import argparse
+from typing import Union
+
 import MySQLdb
 import requests
-import configparser
-from typing import Union
+
 
 """
     Script to update disease names.
     If the new disease name already exists in the db, then it updates
     the disease id in locus_genotype_disease with the existing disease id.
 
-    Params:
-            --config : Config file name containing the database and API connection info (mandatory)
+    Options:
+            --config: Config file name containing the database and API connection info (mandatory)
                     File format is the following:
-                        [database]
+                        [g2p_database]
                         host = <>
                         port = <>
                         user = <>
@@ -26,7 +28,7 @@ from typing import Union
                         [api]
                         api_url = <>
 
-            --file : Tab delimited file with all diseases to be updated (mandatory)
+            --file: Tab delimited file with all diseases to be updated (mandatory)
                 File format is the following:
                     g2p id\tgene symbol\tdisease name\tdisease name formatted\tallelic requirement\tadd synonym\tupdated
 
@@ -34,6 +36,7 @@ from typing import Union
             --api_password: Password to connect to the G2P API (mandatory)
             --dryrun: Test script without running the updates (not run by default)
 """
+
 
 # List of disease ids to be replaced by an existing disease id
 # The update is done in the locus_genotype_disease (replace disease id)
@@ -121,9 +124,9 @@ def dump_data(
                         "accession": row[2],
                         "term": row[3],
                         "description": row[4],
-                        "source": row[5]
+                        "source": row[5],
                     }
-                ]
+                ],
             }
         else:
             disease_ontologies[row[0]]["ontologies"].append(
@@ -131,7 +134,7 @@ def dump_data(
                     "accession": row[2],
                     "term": row[3],
                     "description": row[4],
-                    "source": row[5]
+                    "source": row[5],
                 }
             )
 
@@ -280,10 +283,15 @@ def read_file(
                                         # has disease ontologies
                                         ontologies_to_add = []
                                         if current_disease in disease_ontologies:
-                                            ontologies_to_add = disease_ontologies[current_disease]["ontologies"]
+                                            ontologies_to_add = disease_ontologies[
+                                                current_disease
+                                            ]["ontologies"]
                                         # Call endpoint to create new disease
                                         new_disease_id = add_disease(
-                                            new_disease, ontologies_to_add, api_url, cookies
+                                            new_disease,
+                                            ontologies_to_add,
+                                            api_url,
+                                            cookies,
                                         )
                                         if not new_disease_id:
                                             wr_diseases.write(
@@ -358,7 +366,11 @@ def read_file(
                         if to_update:
                             if add_synonym == "yes":
                                 diseases_to_update.append(
-                                    {"id": db_data["disease_id"], "name": new_disease, "add_synonym": True}
+                                    {
+                                        "id": db_data["disease_id"],
+                                        "name": new_disease,
+                                        "add_synonym": True,
+                                    }
                                 )
                             else:
                                 diseases_to_update.append(
@@ -373,7 +385,10 @@ def read_file(
 
 
 def add_disease(
-    disease_name: str, ontologies: list, api_url: str, cookies: requests.cookies.RequestsCookieJar
+    disease_name: str,
+    ontologies: list,
+    api_url: str,
+    cookies: requests.cookies.RequestsCookieJar,
 ) -> int:
     """
     Method to create a new disease and its corresponding ontologies.
@@ -475,7 +490,7 @@ def update_diseases(
 
 def main():
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", required=True, help="Config file")
+    parser.add_argument("--config", required=True, help="Config file with details to the G2P database and API URL")
     parser.add_argument(
         "--file",
         required=True,
@@ -504,16 +519,24 @@ def main():
     config = configparser.ConfigParser()
     config.read(config_file)
 
-    db_host = config["database"]["host"]
-    db_port = config["database"]["port"]
-    db_name = config["database"]["name"]
-    user = config["database"]["user"]
-    password = config["database"]["password"]
+    try:
+        g2p_config = config["g2p_database"]
+    except KeyError:
+        sys.exit("ERROR: 'g2p_database' missing from config file")
+    else:
+        db_host = g2p_config["host"]
+        db_port = int(g2p_config["port"])
+        db_name = g2p_config["name"]
+        user = g2p_config["user"]
+        password = g2p_config["password"]
+
     api_url = config["api"]["api_url"]
     cookies = None
 
     print("Dump data from G2P...")
-    diseases, disease_ontologies = dump_data(db_host, int(db_port), db_name, user, password)
+    diseases, disease_ontologies = dump_data(
+        db_host, db_port, db_name, user, password
+    )
     print("Dump data from G2P... done\n")
 
     if os.path.isfile(file):
@@ -538,7 +561,9 @@ def main():
             cookies = login(api_username, api_password, api_url)
 
         print("Parsing diseases to update...")
-        diseases_to_update = read_file(file, diseases, disease_ontologies, dryrun, api_url, cookies)
+        diseases_to_update = read_file(
+            file, diseases, disease_ontologies, dryrun, api_url, cookies
+        )
         print("Parsing diseases to update... done\n")
 
         if not dryrun:
