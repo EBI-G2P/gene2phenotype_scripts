@@ -90,8 +90,7 @@ def get_updated_records(data: dict[str, Any]) -> dict:
     url = f"{data['api_url'].rstrip('/')}/later_review_date/"
     response = requests.get(url)
     if response.status_code == 200:
-        response_data = json.loads(response.content)
-        return response_data
+        return json.loads(response.content)
     else:
         sys.exit(f"Could not fetch updated records from {url}")
 
@@ -165,8 +164,7 @@ def get_deleted_records(data: dict[str, Any]) -> dict:
     url = f"{data['api_url'].rstrip('/')}/gencc_deleted_records/"
     response = requests.get(url)
     if response.status_code == 200:
-        response_data = json.loads(response.content)
-        return response_data
+        return json.loads(response.content)
     else:
         sys.exit(f"Could not fetch deleted records from {url}")
 
