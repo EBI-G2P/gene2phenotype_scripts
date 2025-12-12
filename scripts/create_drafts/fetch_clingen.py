@@ -12,10 +12,10 @@ from typing import List, Dict
 
 
 """
-Script to fetch the gene-disease data from ClinGen
+Script to extract the ClinGen evidence summary.
 
 Options:
-        --input_file     ClinGen gene-disease validity (supported format: csv)
+        --input_file:    ClinGen gene-disease validity (supported format: csv)
 
 Example how to run:
     python fetch_clingen.py --input_file Clingen-Gene-Disease-Summary-2025-11-11.csv

@@ -12,78 +12,58 @@ from pydantic import BaseModel
 
 
 """
+Script to extract data from the ClinGen evidence summaries using the Google Gemini model.
 
-python scripts/create_drafts/gemini_analise_clingen.py \
-    --input_file clingen_extracted_data.json \
-    --key_file project_key.json \
-    -m gemini-2.5-pro --location us-central1 \
-    --clingen_panel "Hearing Loss Gene Curation Expert Panel"
+Options:
+        --config:        Config file containing the Gemini model details (mandatory)
+                            File format is the following: 
+                            [gemini_model]
+                            key_file = <> # Google Vertex AI key (format: json)
+                            model = <>    # Gemini model (default: gemini-2.5-flash)
+                            location = <> # Location for the Gemini model (default: europe-west2)
+                            project_name = <>
+        --input_file:    Input JSON file with ClinGen evidence summaries (mandatory)
+        -l \ --limit:         Process N entries and exit (default: all)
+        --rpm:           Max requests per minute (default: 10)
+        --clingen_panel: Run the analysis only for records in the specific ClinGen panel (default: all)
+
+Example usage:
+    python gemini_analise_clingen.py \
+        --input_file clingen_extracted_data.json \
+        --config config.ini \
+        --clingen_panel "Hearing Loss Gene Curation Expert Panel"
 """
 
-
-def main():
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--input_file", type=Path, help="Input JSON file")
-    parser.add_argument(
-        "--key_file",
-        type=Path,
-        required=True,
-        help="Google Vertex AI key (json file)"
-    )
-    parser.add_argument(
-        "-l",
-        "--limit",
-        type=int,
-        default=0,
-        metavar="N",
-        help="Process N entries and exit (default: all)",
-    )
-    parser.add_argument(
-        "-m",
-        "--model",
-        default="gemini-2.5-flash",
-        help="Gemini model (default: gemini-2.5-flash)",
-    )
-    parser.add_argument(
-        "--location",
-        default="europe-west2",
-        help="Location for the Gemini model (default: europe-west2)",
-    )
-    parser.add_argument(
-        "--rpm",
-        type=int,
-        default=10,
-        help="Max requests per minute (default: 10)"
-    )
-    parser.add_argument(
-        "--clingen_panel",
-        type=str,
-        default=None,
-        help="Run the analysis only for records in the specific ClinGen panel"
-    )
-
-    args = parser.parse_args()
-
-    run_process(args)
 
 def run_process(args):
     with args.input_file.open("rt") as fh:
         clingen_data = json.load(fh)
 
+    # Get the Gemini model details from the config file
+    config = argparse.ConfigParser()
+    config.read(args.config)
+    try:
+        gemini_config = config["gemini_model"]
+    except KeyError:
+        sys.exit("ERROR: 'gemini_model' missing from config file")
+    args.key_file = gemini_config.get("key_file")
+    args.model = gemini_config.get("model", "gemini-2.5-flash")
+    args.location = gemini_config.get("location", "europe-west2")
+    args.project_name = gemini_config.get("project_name")
+
     credentials = load_json_key(args.key_file)
 
     client = genai.Client(
         vertexai=True,
-        project="prj-int-dev-paradigm-g2p",
-        location=args.location, # gemini pro is available at us-central1; flash is in europe-west2
+        project=args.project_name,
+        location=args.location,  # gemini pro is available at us-central1; flash is in europe-west2
         credentials=credentials,
-        http_options=HttpOptions(api_version="v1")
+        http_options=HttpOptions(api_version="v1"),
     )
 
     try:
         done = 0
-        
+
         if args.rpm > 0:
             secs = 60.0 / args.rpm
         else:
@@ -115,14 +95,16 @@ def run_process(args):
             print(f"Disease             : {output.disease}", file=sys.stderr)
             print(f"OMIM/Mondo ID       : {output.disease_id}", file=sys.stderr)
             print(f"Mechanism           : {output.mechanism}", file=sys.stderr)
-            print(f"Allelic requirement : {output.allelic_requirement}", file=sys.stderr)
+            print(
+                f"Allelic requirement : {output.allelic_requirement}", file=sys.stderr
+            )
             print(f"Phenotypes          : {output.phenotypes}", file=sys.stderr)
             print(f"Comment             : {output.comment}", file=sys.stderr)
 
             done += 1
             if done == args.limit:
                 return
-            
+
             time.sleep(secs)
     finally:
         with args.input_file.open("wt") as fh:
@@ -130,7 +112,9 @@ def run_process(args):
 
 
 def load_json_key(key_file):
-    credentials = service_account.Credentials.from_service_account_file(key_file).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
+    credentials = service_account.Credentials.from_service_account_file(
+        key_file
+    ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
     return credentials
 
 
@@ -146,9 +130,7 @@ class Relevance(BaseModel):
     comment: str
 
 
-def process_publication(
-    client: genai.Client, record: dict, model: str
-) -> Relevance:
+def process_publication(client: genai.Client, record: dict, model: str) -> Relevance:
     prompt = f"""\
 You are a biomedical information extraction assistant. \
 You will be provided with a specific gene and disease, along with an Evidence summary \
@@ -188,10 +170,10 @@ After producing the structured output, provide one short comment stating \
 whether additional diseases (besides the input disease) appear in the evidence summary.
 
 Input:
-gene: {record['gene_symbol']}\
-disease: {record['disease']}
+gene: {record["gene_symbol"]}\
+disease: {record["disease"]}
 Here it is the text to analise:
-Evidence summary: {record['evidence_summary']}\
+Evidence summary: {record["evidence_summary"]}\
 """
     response = client.models.generate_content(
         model=model,
@@ -204,6 +186,39 @@ Evidence summary: {record['evidence_summary']}\
     )
 
     return response.parsed
+
+
+def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--input_file", type=Path, help="Input JSON file")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Config file containing the Gemini model details (key_file, model, location, project_name)",
+    )
+    parser.add_argument(
+        "-l",
+        "--limit",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Process N entries and exit (default: all)",
+    )
+    parser.add_argument(
+        "--rpm", type=int, default=10, help="Max requests per minute (default: 10)"
+    )
+    parser.add_argument(
+        "--clingen_panel",
+        type=str,
+        default=None,
+        help="Run the analysis only for records in the specific ClinGen panel",
+    )
+
+    args = parser.parse_args()
+
+    run_process(args)
 
 
 if __name__ == "__main__":
