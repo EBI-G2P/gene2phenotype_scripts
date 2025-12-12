@@ -1,14 +1,37 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
-import MySQLdb
-import requests
 import configparser
-import re
+import requests
+
+import MySQLdb
 
 
-def dump_ontology_data(db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, dict]:
+"""
+    Script to update the Mondo/OMIM ontology terms.
+
+    Options:
+        --config    Config file with details to the G2P database and API URL (mandatory)
+                        File format is the following:
+                                [g2p_database]
+                                host = <>
+                                port = <>
+                                user = <>
+                                password = <>
+                                name = <>
+
+                                [api]
+                                api_url = <>
+        
+        --api_username    Username to connect to the G2P API (mandatory)
+        --api_password    Password to connect to the G2P API (mandatory)
+        --dryrun          Option to test the updates without applying them (optional)
+"""
+
+
+def dump_ontology_data(
+    db_host: str, db_port: int, db_name: str, user: str, password: str
+) -> dict[str, dict]:
     """
     Method to fetch all the OMIM and Mondo ontology terms stored in G2P.
 
@@ -31,7 +54,9 @@ def dump_ontology_data(db_host: str, db_port: int, db_name: str, user: str, pass
                 WHERE s.name = 'Mondo' OR s.name = 'OMIM'
           """
 
-    db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
+    db = MySQLdb.connect(
+        host=db_host, port=db_port, user=user, passwd=password, db=db_name
+    )
     cursor = db.cursor()
     cursor.execute(sql)
     data = cursor.fetchall()
@@ -39,10 +64,7 @@ def dump_ontology_data(db_host: str, db_port: int, db_name: str, user: str, pass
         try:
             ontology_records[row[0]]
         except KeyError:
-            ontology_records[row[0]] = {
-                "term": row[1],
-                "description": row[2]
-            }
+            ontology_records[row[0]] = {"term": row[1], "description": row[2]}
         else:
             print(f"WARNING: duplicated ontology term '{row[0]}'")
 
@@ -51,7 +73,9 @@ def dump_ontology_data(db_host: str, db_port: int, db_name: str, user: str, pass
     return ontology_records
 
 
-def analyse_terms(ontology_records: dict[str, dict]) -> tuple[dict[str, dict], list[str]]:
+def analyse_terms(
+    ontology_records: dict[str, dict],
+) -> tuple[dict[str, dict], list[str]]:
     """
     Method to analyse which ontology terms have to be updated or removed.
     Records to update are:
@@ -63,7 +87,7 @@ def analyse_terms(ontology_records: dict[str, dict]) -> tuple[dict[str, dict], l
     Returns:
         dict[str, dict]: dictionary with ontology terms to be updated
         list[str]: list of ontology IDs that are obsolete
-    """    
+    """
     records_to_update = {}
     records_to_delete = []
 
@@ -76,12 +100,12 @@ def analyse_terms(ontology_records: dict[str, dict]) -> tuple[dict[str, dict], l
                 new_term, new_description = get_mondo(accession)
             else:
                 new_term, new_description = get_omim(accession)
-            
+
             # If the ontology ID has a term then add it to the list of records to be updated
             if new_term:
                 records_to_update[accession] = {
                     "term": new_term,
-                    "description": new_description
+                    "description": new_description,
                 }
             else:
                 print(f"WARNING: invalid ontology ID {accession}")
@@ -106,16 +130,16 @@ def get_mondo(id: str) -> tuple[str, str]:
     term = None
     description = None
 
-    r = requests.get(url, headers={ "Content-Type" : "application/json"})
+    r = requests.get(url, headers={"Content-Type": "application/json"})
 
     if not r.ok:
         return None
 
     decoded = r.json()
     if decoded["response"]["numFound"] != 0:
-        if len(decoded['response']['docs'][0]['description']) > 0:
-            description = decoded['response']['docs'][0]['description'][0]
-        term = decoded['response']['docs'][0]['label']
+        if len(decoded["response"]["docs"][0]["description"]) > 0:
+            description = decoded["response"]["docs"][0]["description"][0]
+        term = decoded["response"]["docs"][0]["label"]
 
     return term, description
 
@@ -129,13 +153,13 @@ def get_omim(id: str) -> tuple[str, str]:
 
     Returns:
         tuple[str, str]: ontology term and description
-    """    
+    """
     disease = None
     description = None
 
     url = f"https://www.ebi.ac.uk/ols4/api/search?q={id}&ontology=cco"
 
-    r = requests.get(url, headers={ "Content-Type" : "application/json"})
+    r = requests.get(url, headers={"Content-Type": "application/json"})
 
     if not r.ok:
         return disease, description
@@ -147,15 +171,20 @@ def get_omim(id: str) -> tuple[str, str]:
         # OLS API can return data from different sources
         # Check only for OMIM data
         if source_name.find("/omim/") != -1:
-            disease = decoded['response']['docs'][0]['label']
+            disease = decoded["response"]["docs"][0]["label"]
 
-            if len(decoded['response']['docs'][0]['description']) > 0:
-                description = decoded['response']['docs'][0]['description'][0]
+            if len(decoded["response"]["docs"][0]["description"]) > 0:
+                description = decoded["response"]["docs"][0]["description"][0]
 
     return disease, description
 
 
-def update_ontologies(records_to_update: dict[str, dict], api_username: str, api_password: str, api_url: str) -> None:
+def update_ontologies(
+    records_to_update: dict[str, dict],
+    api_username: str,
+    api_password: str,
+    api_url: str,
+) -> None:
     """
     Method that calls the G2P API to update all the ontology terms.
 
@@ -169,16 +198,17 @@ def update_ontologies(records_to_update: dict[str, dict], api_username: str, api
     ontology_url = "update/disease_ontology_terms/"
     login_url = "login/"
 
-    data = {
-        "username": api_username,
-        "password": api_password
-    }
+    data = {"username": api_username, "password": api_password}
 
     if records_to_update:
         response = requests.post(api_url + login_url, json=data)
         if response.status_code == 200:
             try:
-                response_update = requests.post(api_url + ontology_url, json=records_to_update, cookies=response.cookies)
+                response_update = requests.post(
+                    api_url + ontology_url,
+                    json=records_to_update,
+                    cookies=response.cookies,
+                )
                 if response_update.status_code == 200:
                     response_json = response_update.json()
                     print("Ontologies updated successfully:", response_json)
@@ -186,7 +216,11 @@ def update_ontologies(records_to_update: dict[str, dict], api_username: str, api
                         for error in response_json["errors"]:
                             print(f"ERROR: {error}")
                 else:
-                    print("Failed to update ontologies:", response_update.status_code, response_update.json())
+                    print(
+                        "Failed to update ontologies:",
+                        response_update.status_code,
+                        response_update.json(),
+                    )
             except Exception as e:
                 print("Error:", e)
         else:
@@ -195,7 +229,9 @@ def update_ontologies(records_to_update: dict[str, dict], api_username: str, api
         print("INFO: no ontology terms to update")
 
 
-def delete_ontologies(records_to_delete: list[str], api_username: str, api_password: str, api_url: str) -> None:
+def delete_ontologies(
+    records_to_delete: list[str], api_username: str, api_password: str, api_url: str
+) -> None:
     """
     Method that calls the G2P API to delete a list of ontology accession.
 
@@ -209,10 +245,7 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
     ontology_url = "update/disease_ontology_terms/"
     login_url = "login/"
 
-    data = {
-        "username": api_username,
-        "password": api_password
-    }
+    data = {"username": api_username, "password": api_password}
 
     if records_to_delete:
         # Login
@@ -220,7 +253,11 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
         if response.status_code == 200:
             try:
                 # Delete ontology terms
-                response_delete = requests.delete(api_url + ontology_url, json=records_to_delete, cookies=response.cookies)
+                response_delete = requests.delete(
+                    api_url + ontology_url,
+                    json=records_to_delete,
+                    cookies=response.cookies,
+                )
                 if response_delete.status_code == 200:
                     response_json = response_delete.json()
                     print("Ontologies delete successfully:", response_json)
@@ -228,7 +265,11 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
                         for error in response_json["errors"]:
                             print(f"ERROR: {error}")
                 else:
-                    print("Failed to delete ontologies:", response_delete.status_code, response_delete.json())
+                    print(
+                        "Failed to delete ontologies:",
+                        response_delete.status_code,
+                        response_delete.json(),
+                    )
             except Exception as e:
                 print("Error:", e)
         else:
@@ -238,15 +279,24 @@ def delete_ontologies(records_to_delete: list[str], api_username: str, api_passw
 
 
 def main():
-    """
-    Script to update the Mondo/OMIM ontology terms.
-    """
-
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", required=True, help="Config file")
-    parser.add_argument("--api_username", required=True, help="Username to connect to the G2P API")
-    parser.add_argument("--api_password", required=True, help="Password to connect to the G2P API")
-    parser.add_argument("--dryrun", required=False, default=0, help="Option to test update")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Config file with details to the G2P database and API URL",
+    )
+    parser.add_argument(
+        "--api_username", required=True, help="Username to connect to the G2P API"
+    )
+    parser.add_argument(
+        "--api_password", required=True, help="Password to connect to the G2P API"
+    )
+    parser.add_argument(
+        "--dryrun",
+        required=False,
+        help="Option to test the updates without applying them",
+        action="store_true",
+    )
     args = parser.parse_args()
 
     config_file = args.config
@@ -258,15 +308,17 @@ def main():
     config = configparser.ConfigParser()
     config.read(config_file)
 
-    db_host = config['database']['host']
-    db_port = config['database']['port']
-    db_name = config['database']['name']
-    user = config['database']['user']
-    password = config['database']['password']
-    api_url = config['api']['api_url']
+    db_host = config["g2p_database"]["host"]
+    db_port = config["g2p_database"]["port"]
+    db_name = config["g2p_database"]["name"]
+    user = config["g2p_database"]["user"]
+    password = config["g2p_database"]["password"]
+    api_url = config["api"]["api_url"]
 
     print("Dump disease ontology data from G2P...")
-    ontology_records = dump_ontology_data(db_host, int(db_port), db_name, user, password)
+    ontology_records = dump_ontology_data(
+        db_host, int(db_port), db_name, user, password
+    )
     print("Dump disease ontology data from G2P... done\n")
 
     records_to_update, records_to_delete = analyse_terms(ontology_records)
@@ -284,5 +336,6 @@ def main():
             print(f"{record}: {records_to_update[record]['term']}")
         print("\nOntologies to delete:", records_to_delete)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
-from datetime import datetime, timedelta
 import os.path
+import sys
+from datetime import datetime, timedelta
+
 import requests
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
@@ -15,7 +16,7 @@ from fpdf.enums import XPos, YPos
                     - report_all_updates_YYYY-MM-DD.pdf
                     - report_updates_YYYY-MM-DD.pdf
 
-    Params:
+    Options:
             --api-url      : G2P API URL (mandatory)
             --api-username : Username to connect to the G2P API (mandatory)
             --api-password : Password to connect to the G2P API (mandatory)
@@ -206,8 +207,12 @@ def generate_report(
         cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
     """
     current_date = datetime.now().date()
-    full_report_file = os.path.join(output_dir, "report_all_updates_" + str(current_date) + ".pdf")
-    minimal_report_file = os.path.join(output_dir, "report_updates_" + str(current_date) + ".pdf")
+    full_report_file = os.path.join(
+        output_dir, "report_all_updates_" + str(current_date) + ".pdf"
+    )
+    minimal_report_file = os.path.join(
+        output_dir, "report_updates_" + str(current_date) + ".pdf"
+    )
 
     # Create the PDF with all the data updates - full report
     pdf = FPDF()
@@ -220,12 +225,21 @@ def generate_report(
     pdf_minimal = FPDF()
     pdf_minimal.add_page()
     pdf_minimal.set_font("helvetica", style="B", size=16)
-    pdf_minimal.multi_cell(0, 7, f"Data updates from {seven_days_ago} to {current_date}\n")
+    pdf_minimal.multi_cell(
+        0, 7, f"Data updates from {seven_days_ago} to {current_date}\n"
+    )
     pdf_minimal.set_font("helvetica", size=12)
 
     for g2p_id, list_logs in activity_logs_by_record.items():
         pdf.set_text_color(0, 0, 255)
-        pdf.multi_cell(0, 5, f"\n### {g2p_id} ###\n", new_x=XPos.LMARGIN, new_y=YPos.NEXT, link="https://www.ebi.ac.uk/gene2phenotype/lgd/"+g2p_id)
+        pdf.multi_cell(
+            0,
+            5,
+            f"\n### {g2p_id} ###\n",
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+            link="https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id,
+        )
         pdf.set_text_color(0, 0, 0)
         # Get all the activity logs for the record
         record_activity_logs = get_record_activity_logs(api_url, g2p_id, cookies)
@@ -267,7 +281,9 @@ def generate_report(
                 ):
                     report_row = f"On {log['date']} {log['user']} deleted a {log['data_type']} for record {log['g2p_id']}\n"
                 elif log["change_type"] == "created":
-                    report_row = f"On {log['date']} {log['user']} created {log['data_type']}: "
+                    report_row = (
+                        f"On {log['date']} {log['user']} created {log['data_type']}: "
+                    )
                     if log["data_type"] == "panel":
                         report_row += f"{log['panel_name']}\n"
                         # Print to the minimal report
@@ -276,7 +292,9 @@ def generate_report(
                     if log["data_type"] == "publication":
                         report_row += f"PMID {log['publication_pmid']}\n"
                     if log["data_type"] == "phenotype":
-                        report_row += f"{log['phenotype']} for PMID {log['publication_pmid']}\n"
+                        report_row += (
+                            f"{log['phenotype']} for PMID {log['publication_pmid']}\n"
+                        )
                     if log["data_type"] == "phenotype_summary":
                         report_row += f"'{log['summary']}'\n"
                     if log["data_type"] == "variant_consequence":
@@ -285,9 +303,7 @@ def generate_report(
                         report_row += f"'{log['variant_type']}' for PMID {log['publication_pmid']}\n"
                     if log["data_type"] == "record_comment":
                         is_public = (
-                            "public comment"
-                            if log["is_public"]
-                            else "private comment"
+                            "public comment" if log["is_public"] else "private comment"
                         )
                         report_row += f"{is_public}\n"
                     if log["data_type"] == "mechanism_synopsis":
@@ -304,7 +320,7 @@ def generate_report(
             # Write to the full report
             if report_row:
                 pdf.multi_cell(0, 5, report_row)
-            
+
             # Save which rows are going to be reported in the minimal report
             if report_minimal_row:
                 list_report_minimal.append(report_minimal_row)
@@ -312,7 +328,14 @@ def generate_report(
         # For each G2P ID write to the minimal report
         if list_report_minimal:
             pdf_minimal.set_text_color(0, 0, 255)
-            pdf_minimal.multi_cell(0, 5, f"\n### {g2p_id} ###\n", new_x=XPos.LMARGIN, new_y=YPos.NEXT, link="https://www.ebi.ac.uk/gene2phenotype/lgd/"+g2p_id)
+            pdf_minimal.multi_cell(
+                0,
+                5,
+                f"\n### {g2p_id} ###\n",
+                new_x=XPos.LMARGIN,
+                new_y=YPos.NEXT,
+                link="https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id,
+            )
             pdf_minimal.set_text_color(0, 0, 0)
             for row in list_report_minimal:
                 pdf_minimal.multi_cell(0, 5, row)

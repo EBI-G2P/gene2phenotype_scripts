@@ -1,8 +1,12 @@
-import sys
+#!/usr/bin/env python3
+
 import argparse
-import MySQLdb
-import datetime
 import configparser
+import datetime
+import sys
+
+import MySQLdb
+
 
 """
     Script to import gene constraint metrics data from gnomAD into the gene_stats table of a G2P database.
@@ -10,15 +14,16 @@ import configparser
     Params:
             --config : Config file name containing the database connection info (mandatory)
                     File format is the following:
-                        [database]
+                        [g2p_database]
                         host = <>
                         port = <>
                         user = <>
                         password = <>
                         name = <>
 
-            --file : input file
-                    Input file can be download from the URL: https://gnomad.broadinstitute.org/downloads#v4-constraint
+            --file : input file (mandatory)
+                    Input file can be download from the following URL:
+                        https://gnomad.broadinstitute.org/downloads#v4-constraint
                     File should be in TSV (.tsv) file format.
 
 """
@@ -63,7 +68,7 @@ def get_attrib_id(
     attrib_id = cursor.fetchone()
 
     if attrib_id is None:
-        raise ValueError("Attrib ID not found in the database.")
+        raise ValueError(f"Attrib '{attrib}' not found in the database.")
 
     cursor.close()
     database.close()
@@ -107,6 +112,7 @@ def get_source_id(
 
     return source_id[0]
 
+
 def check_gene_stats(
     db_host: str, db_port: int, db_name: str, user: str, password: str
 ) -> None:
@@ -124,8 +130,8 @@ def check_gene_stats(
         None
     """
     get_count_query = """ SELECT count(*) FROM gene_stats g 
-                                 LEFT JOIN source s ON g.source_id = s.id
-                                 WHERE s.name = %s """
+                          LEFT JOIN source s ON g.source_id = s.id
+                          WHERE s.name = %s """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -140,7 +146,10 @@ def check_gene_stats(
     database.close()
 
     if record_count > 0:
-        sys.exit("Error: gnomAD constraint metrics data already exists in 'gene_stats' table.")
+        sys.exit(
+            "Error: gnomAD constraint metrics data already exists in 'gene_stats' table."
+        )
+
 
 def validate_input_file(
     file: str,
@@ -188,7 +197,7 @@ def is_valid_score(score: str) -> bool:
     Returns:
         bool: if the score is valid or not
     """
-    return score and score != "" and score != "NA" 
+    return score and score != "" and score != "NA"
 
 
 def get_ensembl_data_from_g2p_db(
@@ -210,9 +219,9 @@ def get_ensembl_data_from_g2p_db(
     ensembl_to_locus_mapping = {}
 
     get_ensembl_to_locus_mapping_query = """ SELECT li.identifier, li.locus_id, l.name FROM locus_identifier li 
-                                                LEFT JOIN locus l ON li.locus_id = l.id 
-                                                LEFT JOIN source s ON li.source_id = s.id 
-                                                WHERE s.name = %s """
+                                             LEFT JOIN locus l ON li.locus_id = l.id 
+                                             LEFT JOIN source s ON li.source_id = s.id 
+                                             WHERE s.name = %s """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -259,7 +268,9 @@ def read_input_file(
     final_data_to_insert = []
 
     # Get source id
-    source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, user, password)
+    source_id = get_source_id(
+        GNOMAD_SOURCE_NAME, db_host, db_port, db_name, user, password
+    )
 
     # Get attrib id
     pli_attrib_id = get_attrib_id(
@@ -274,7 +285,7 @@ def read_input_file(
     # IF a mapping is -> <ensembl_id>: () THEN it means that the <ensembl_id> does not have a canonical transcript in the input data
     # IF a mapping is -> <ensembl_id>: (<pli_score>, <loeuf_score>) THEN it means that the <ensembl_id> has a canonical transcript in the input data and the scores are stored
     input_ensembl_to_scores_mapping = {}
-    
+
     # Read input file and store input data
     with open(file, "r", encoding="utf-8") as f:
         for line in f:
@@ -289,18 +300,24 @@ def read_input_file(
                 if gene_id.startswith("ENSG"):
                     if gene_id not in input_ensembl_to_scores_mapping:
                         if canonical == "true":
-                            input_ensembl_to_scores_mapping[gene_id] = (pli_score, loeuf_score)
+                            input_ensembl_to_scores_mapping[gene_id] = (
+                                pli_score,
+                                loeuf_score,
+                            )
                         elif canonical == "false":
                             input_ensembl_to_scores_mapping[gene_id] = ()
                     else:
                         if canonical == "true":
                             if len(input_ensembl_to_scores_mapping[gene_id]) == 0:
-                                input_ensembl_to_scores_mapping[gene_id] = (pli_score, loeuf_score)
+                                input_ensembl_to_scores_mapping[gene_id] = (
+                                    pli_score,
+                                    loeuf_score,
+                                )
                             else:
                                 print(
                                     f"Warning: Gene '{gene}' with Gene ID '{gene_id}' has multiple canonical transcripts in input file data. Processed first match but skipped row with Gene '{gene}', Gene ID '{gene_id}' and canonical value '{canonical}'."
                                 )
-    
+
     # Process input data
     success_count = 0
     for ensembl_id, score_tuple in input_ensembl_to_scores_mapping.items():
@@ -365,9 +382,7 @@ def read_input_file(
                         f"Warning: Gene ID '{ensembl_id}' has empty 'pli' and 'loeuf' scores in input file data. Skipped gene."
                     )
         else:
-            print(
-                f"Warning: Gene ID '{ensembl_id}' not found in G2P DB. Skipped gene."
-            )
+            print(f"Warning: Gene ID '{ensembl_id}' not found in G2P DB. Skipped gene.")
 
     if len(final_data_to_insert) == 0:
         sys.exit("Error: No valid data found in input file.")
@@ -405,7 +420,8 @@ def insert_into_gene_stats(
         None
     """
 
-    sql_insert_gene_stats = """ INSERT into gene_stats (gene_symbol, gene_id, score, source_id, description_attrib_id) VALUES (%s, %s, %s, %s, %s)"""
+    sql_insert_gene_stats = """ INSERT into gene_stats (gene_symbol, gene_id, score, source_id, description_attrib_id)
+                                VALUES (%s, %s, %s, %s, %s)"""
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -433,9 +449,12 @@ def insert_details_into_meta(
     Returns:
         None
     """
-    source_id = get_source_id(GNOMAD_SOURCE_NAME, db_host, db_port, db_name, user, password)
+    source_id = get_source_id(
+        GNOMAD_SOURCE_NAME, db_host, db_port, db_name, user, password
+    )
 
-    insert_into_meta_query = """ INSERT into meta(`key`, date_update, description, version, source_id, is_public) VALUES (%s, %s, %s, %s, %s, %s) """
+    insert_into_meta_query = """ INSERT into meta(`key`, date_update, description, version, source_id, is_public)
+                                VALUES (%s, %s, %s, %s, %s, %s) """
 
     database = MySQLdb.connect(
         host=db_host, port=db_port, user=user, passwd=password, db=db_name
@@ -444,7 +463,14 @@ def insert_details_into_meta(
 
     cursor.execute(
         insert_into_meta_query,
-        (META_KEY, datetime.datetime.now(), META_DESCRIPTION, META_VERSION, source_id, 0),
+        (
+            META_KEY,
+            datetime.datetime.now(),
+            META_DESCRIPTION,
+            META_VERSION,
+            source_id,
+            0,
+        ),
     )
 
     database.commit()
@@ -456,7 +482,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="This script is used to import the constraint metrics from a file and insert that data into the 'gene_stats' table in the G2P DB"
     )
-    parser.add_argument("--config", required=True, help="Config file")
+    parser.add_argument(
+        "--config", required=True, help="Config file with DB connection details"
+    )
     parser.add_argument(
         "--file",
         required=True,
@@ -471,11 +499,16 @@ def main():
     config = configparser.ConfigParser()
     config.read(config_file)
 
-    db_host = config["database"]["host"]
-    db_port = int(config["database"]["port"])
-    db_name = config["database"]["name"]
-    user = config["database"]["user"]
-    pwd = config["database"]["password"]
+    try:
+        g2p_config = config["g2p_database"]
+    except KeyError:
+        sys.exit("ERROR: 'g2p_database' missing from config file")
+    else:
+        db_host = g2p_config["host"]
+        db_port = int(g2p_config["port"])
+        db_name = g2p_config["name"]
+        user = g2p_config["user"]
+        pwd = g2p_config["password"]
 
     print("Checking if data already exists in gene_stats table...")
     check_gene_stats(db_host, db_port, db_name, user, pwd)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
 import configparser
 import csv
-import MySQLdb
 import os.path
+import sys
+
+import MySQLdb
 import requests
 from lxml import etree as ET
 
@@ -46,7 +47,7 @@ def get_g2p_version(api_url: str) -> str:
     try:
         response = requests.get(url)
     except Exception as e:
-        sys.exit(f"Error while fetching the G2P version:", e)
+        sys.exit("Error while fetching the G2P version:", str(e))
     else:
         if response.status_code == 200:
             result = response.json()
@@ -54,7 +55,7 @@ def get_g2p_version(api_url: str) -> str:
                 if obj["key"] == "g2p_release":
                     g2p_version = obj["version"]
         else:
-            sys.exit(f"Failed to fetch G2P version from API")
+            sys.exit("Failed to fetch G2P version from API")
 
     return g2p_version
 
@@ -110,14 +111,14 @@ def dump_g2p_records(
     try:
         response = requests.get(url, stream=True)
     except Exception as e:
-        sys.exit(f"Error while downloading G2P data:", e)
+        sys.exit("Error while downloading G2P data:", str(e))
     else:
         if response.status_code == 200:
             with open(g2p_file, "wb") as wr:
                 for chunk in response.iter_content(chunk_size=128):
                     wr.write(chunk)
         else:
-            sys.exit(f"Failed to download G2P data")
+            sys.exit("Failed to download G2P data")
 
     # Read the file
     with open(g2p_file, "r") as fh:
@@ -181,7 +182,9 @@ def create_xml(g2p_version: str, g2p_records: dict[str, dict]) -> bytes:
         "Gene2Phenotype (G2P) is a detailed collection of expert curated gene-disease associations with information on allelic requirement, observed variant classes and disease mechanism",
     )
     add_element(database_element, "url", "https://www.ebi.ac.uk/gene2phenotype/")
-    add_element(database_element, "url_search", "https://www.ebi.ac.uk/gene2phenotype/lgd/")
+    add_element(
+        database_element, "url_search", "https://www.ebi.ac.uk/gene2phenotype/lgd/"
+    )
     add_element(database_element, "release", g2p_version)
     add_element(database_element, "entry_count", str(len(g2p_records)))
 
@@ -276,7 +279,7 @@ def main():
         sys.exit("ERROR: 'g2p_database' missing from config file")
     else:
         db_host = g2p_config["host"]
-        db_port = g2p_config["port"]
+        db_port = int(g2p_config["port"])
         db_name = g2p_config["name"]
         user = g2p_config["user"]
         password = g2p_config["password"]
@@ -291,9 +294,7 @@ def main():
     # Get the G2P version from the meta table
     g2p_version = get_g2p_version(api_url)
     # Fetch all records to be available in the EBI search
-    g2p_records = dump_g2p_records(
-        api_url, db_host, int(db_port), db_name, user, password
-    )
+    g2p_records = dump_g2p_records(api_url, db_host, db_port, db_name, user, password)
     # # Generate the XML with all records
     xml_data = create_xml(g2p_version, g2p_records)
 

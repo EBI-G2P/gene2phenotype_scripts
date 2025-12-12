@@ -1,37 +1,34 @@
-import os
-import re
-import sys
-import datetime
+#!/usr/bin/env python3
+
 import argparse
+import configparser
+import datetime
+import os
+import sys
+
 import MySQLdb
+
 
 """
     Script to import gene probability data into the gene_stats table of a G2P database.
 
     Options:
-    --host : str (required)
-        The hostname or IP address of the database server where the data will be imported.
+            --config : Config file name containing the G2P database connection info (mandatory)
+                            File format is the following:
+                                [g2p_database]
+                                host = <>
+                                port = <>
+                                user = <>
+                                password = <>
+                                name = <>
 
-    -p, --port : int (required)
-        The port number on which the database server is listening.
-
-    -d, --database : str (required)
-        The name of the G2P database into which the data will be imported.
-
-    -pwd, --password : str (required)
-        The password for the database user.
-
-    -u, --user : str (required)
-        The username for connecting to the G2P database.
-
-    -d, --dir : str (required)
-        Path to the folder with all the input files.
+            -d, --dir : str (mandatory)
+                Path to the folder with all the input files.
 
     Example usage:
-    --------------
-    python script.py --host localhost --port 3306 --database g2p_db \
-        --password secret_pwd --user db_user --dir /path/to/files
+            python script.py --config config.ini --dir /path/to/files
 """
+
 
 # Mapping the attrib to the input file
 attrib_mapping = {
@@ -110,7 +107,8 @@ def insert_into_gene_stats(host, port, db, password, user, final_scores):
     Reads input files and inserts gene-related data into the `gene_stats` table.
     """
 
-    sql_insert_gene_stats = """ INSERT into gene_stats (gene_symbol, gene_id, score, source_id, description_attrib_id) VALUES (%s, %s, %s, %s, %s)"""
+    sql_insert_gene_stats = """ INSERT into gene_stats (gene_symbol, gene_id, score, source_id, description_attrib_id)
+                                VALUES (%s, %s, %s, %s, %s)"""
 
     database = MySQLdb.connect(host=host, port=port, user=user, passwd=password, db=db)
     cursor = database.cursor()
@@ -173,7 +171,8 @@ def insert_details_into_meta(host, port, db, password, user):
     source_id = get_source_details(host, port, db, password, user)
     description = "Baydoni & Marsh probabilities"
 
-    insert_into_meta_query = """ INSERT into meta(`key`, date_update, description, version, source_id, is_public) VALUES (%s, %s, %s, %s, %s, %s) """
+    insert_into_meta_query = """ INSERT into meta(`key`, date_update, description, version, source_id, is_public)
+                                 VALUES (%s, %s, %s, %s, %s, %s) """
 
     database = MySQLdb.connect(host=host, port=port, user=user, passwd=password, db=db)
     cursor = database.cursor()
@@ -198,42 +197,31 @@ def main():
         description="This script is used to import the probabilities from a file and imports it to the gene_stats table in the G2P DB"
     )
     parser.add_argument(
-        "--host",
+        "--config",
         required=True,
-        help="Host of the database were the data is to be imported",
-    )
-    parser.add_argument(
-        "-p",
-        "--port",
-        required=True,
-        help="Port information of the database to be imported",
-    )
-    parser.add_argument(
-        "-d",
-        "--database",
-        required=True,
-        help="G2P Database to import the information into",
-    )
-    parser.add_argument(
-        "-pwd",
-        "--password",
-        required=True,
-        help="Password for the G2P database information",
-    )
-    parser.add_argument(
-        "-u", "--user", required=True, help="User information for the G2P database"
+        help="Config file with G2P database connection details",
     )
     parser.add_argument("--dir", required=True, help="Directory with the input files")
 
     args = parser.parse_args()
 
-    host = args.host
-    port = args.port
-    db = args.database
-    pwd = args.password
-    user = args.user
+    config_file = args.config
     dir = args.dir
-    port = int(port)
+
+    # Load the config file
+    config = configparser.ConfigParser()
+    config.read(config_file)
+
+    try:
+        g2p_config = config["g2p_database"]
+    except KeyError:
+        sys.exit("ERROR: 'g2p_database' missing from config file")
+    else:
+        host = g2p_config["host"]
+        port = int(g2p_config["port"])
+        db = g2p_config["name"]
+        user = g2p_config["user"]
+        pwd = g2p_config["password"]
 
     print("Getting locus id from the G2P DB...")
     list_gene_ids = get_locus_id_from_g2p_db(host, port, db, pwd, user)

@@ -8,7 +8,28 @@ import re
 import sys
 import urllib.request
 from datetime import datetime
+
 import MySQLdb
+
+
+"""
+    Script to update genes in G2P database based on a new Ensembl GTF file.
+    By default, it updates/adds genes based on the Ensembl stable IDs.
+    To only update the gene symbols based on HGNC data, use the --only_update_gene_symbols option.
+
+    Options:
+            --config:       Config file with details to the G2P database (mandatory)
+                            File format is the following:
+                                [g2p_database]
+                                host = <>
+                                port = <>
+                                user = <>
+                                password = <>
+                                name = <>
+            --working_dir:  Working directory to store report files (mandatory)
+            --version:      Ensembl version only required if going to run the genes update (optional)
+            --only_update_gene_symbols:  Only update gene symbols based on HGNC data (optional)
+"""
 
 
 def locus_id_foreign_key_check(
@@ -1109,7 +1130,9 @@ def main():
     print("Running checks... done")
 
     # Update meta
-    update_meta(db_host, db_port, db_name, user, password, version, only_update_gene_symbol)
+    update_meta(
+        db_host, db_port, db_name, user, password, version, only_update_gene_symbol
+    )
 
 
 if __name__ == "__main__":
