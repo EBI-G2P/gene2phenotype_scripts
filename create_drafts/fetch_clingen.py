@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
-import configparser
 import csv
+import json
 import os.path
+import sys
+from typing import List, Dict
 from html.parser import HTMLParser
 import requests
-import json
-from typing import List, Dict
 
 
 """

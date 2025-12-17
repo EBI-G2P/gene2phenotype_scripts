@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 
-import os
-import sys
-import re
 import argparse
-import MySQLdb
-import django
 import configparser
+import os
+import re
+import sys
 from collections import defaultdict
 from difflib import SequenceMatcher
+
+import django
+import MySQLdb
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'gene2phenotype_app')
-django.setup()
 from gene2phenotype_app.utils import clean_string
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gene2phenotype_app")
+django.setup()
+
 
 """
 Description: Script to compare the similarity between the G2P diseases names and associated synonyms.
@@ -29,14 +32,16 @@ Options
                         user = <>
                         password = <>
                         name = <>
-        --cutoff : Score value to filter the results
-        --output_file : Name of the output file
+        --cutoff : Score value to filter the results (optional, default=0.5)
+        --output_file : Name of the output file (optional, default=report_disease_scores.txt)
 
 Requirements: Add the gene2phenotype_app project path to PYTHONPATH (export PYTHONPATH=_path_to_gene2phenotype_)
 """
 
 
-def dump_g2p_diseases(db_host: str, db_port: int, db_name: str, user: str, password: str) -> dict[str, list]:
+def dump_g2p_diseases(
+    db_host: str, db_port: int, db_name: str, user: str, password: str
+) -> dict[str, list]:
     """
     Queries the G2P database to dump all the diseases that have a disease synonym.
 
@@ -52,7 +57,9 @@ def dump_g2p_diseases(db_host: str, db_port: int, db_name: str, user: str, passw
     """
     diseases = defaultdict(list)
 
-    db = MySQLdb.connect(host=db_host, port=db_port, user=user, passwd=password, db=db_name)
+    db = MySQLdb.connect(
+        host=db_host, port=db_port, user=user, passwd=password, db=db_name
+    )
     cursor = db.cursor()
 
     sql = """   SELECT d.name, s.synonym
@@ -71,7 +78,9 @@ def dump_g2p_diseases(db_host: str, db_port: int, db_name: str, user: str, passw
     return diseases
 
 
-def compare_diseases(g2p_disease_synonyms : dict[str, list], cutoff: float, output_file: str) -> None:
+def compare_diseases(
+    g2p_disease_synonyms: dict[str, list], cutoff: float, output_file: str
+) -> None:
     """
     Check how similar each G2P disease is with its associated synonyms.
     Write to a file the diseases with similarity score below the cutoff.
@@ -81,35 +90,51 @@ def compare_diseases(g2p_disease_synonyms : dict[str, list], cutoff: float, outp
         output_file (str): Output file name
         cutoff (float): return only diseases with similarity below this value
     """
-    model = SentenceTransformer('pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb')
+    model = SentenceTransformer(
+        "pritamdeka/BioBERT-mnli-snli-scinli-scitail-mednli-stsb"
+    )
 
     with open(output_file, "w") as wr:
-        wr.write(f"G2P disease name\tG2P disease synonym\tScore (SequenceMatcher)\tScore (BioBERT)\n")
+        wr.write(
+            "G2P disease name\tG2P disease synonym\tScore (SequenceMatcher)\tScore (BioBERT)\n"
+        )
 
         for disease_name, synonyms_list in g2p_disease_synonyms.items():
             # Clean the disease name
-            new_disease_name = re.sub(".*\-related\s*", "", disease_name.lower()).strip()
+            new_disease_name = re.sub(
+                ".*\-related\s*", "", disease_name.lower()
+            ).strip()
             clean_disease_name = clean_string(new_disease_name)
             for synonym_name in synonyms_list:
                 # Clean the synonym
-                new_synonym_name = re.sub(".*\-related\s*", "", synonym_name.lower()).strip()
+                new_synonym_name = re.sub(
+                    ".*\-related\s*", "", synonym_name.lower()
+                ).strip()
                 clean_synonym_name = clean_string(new_synonym_name)
 
                 # Calculate the string similarity
-                score = SequenceMatcher(None, clean_disease_name, clean_synonym_name).ratio()
+                score = SequenceMatcher(
+                    None, clean_disease_name, clean_synonym_name
+                ).ratio()
 
                 embeddings = model.encode([clean_disease_name, clean_synonym_name])
                 similarity = cosine_similarity([embeddings[0]], [embeddings[1]])
 
                 if score < cutoff:
-                    wr.write(f"{disease_name}\t{synonym_name}\t{score}\t{similarity[0][0]}\n")
+                    wr.write(
+                        f"{disease_name}\t{synonym_name}\t{score}\t{similarity[0][0]}\n"
+                    )
 
 
 def main():
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--config", required=True, help="Config file with details to the G2P database")
+    parser.add_argument(
+        "--config", required=True, help="Config file with details to the G2P database"
+    )
     parser.add_argument("--cutoff", default=0.5, help="Return scores below this cutoff")
-    parser.add_argument("--output_file", default="report_disease_scores.txt", help="Output file name")
+    parser.add_argument(
+        "--output_file", default="report_disease_scores.txt", help="Output file name"
+    )
 
     args = parser.parse_args()
     config_file = args.config
@@ -121,18 +146,21 @@ def main():
     config.read(config_file)
 
     try:
-        g2p_config = config['g2p_database']
+        g2p_config = config["g2p_database"]
     except KeyError:
         sys.exit("ERROR: 'g2p_database' missing from config file")
     else:
-        db_host = g2p_config['host']
-        db_port = g2p_config['port']
-        db_name = g2p_config['name']
-        user = g2p_config['user']
-        password = g2p_config['password']
+        db_host = g2p_config["host"]
+        db_port = g2p_config["port"]
+        db_name = g2p_config["name"]
+        user = g2p_config["user"]
+        password = g2p_config["password"]
 
-    g2p_disease_synonyms = dump_g2p_diseases(db_host, int(db_port), db_name, user, password)
+    g2p_disease_synonyms = dump_g2p_diseases(
+        db_host, int(db_port), db_name, user, password
+    )
     compare_diseases(g2p_disease_synonyms, float(cutoff), output_file)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
