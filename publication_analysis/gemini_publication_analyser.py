@@ -1,17 +1,11 @@
-"""
-Download G2P records and mined publications
-$ python gemini_publication_analyser.py init g2p_records.json
-
-Process 300 publications
-$ python gemini_publication_analyser.py process --key_file key.json --limit 300 g2p_records.json
-"""
+#!/usr/bin/env python3
 
 import argparse
 import csv
+import configparser
 import json
 import sys
 import time
-import os
 from enum import Enum
 from html.parser import HTMLParser
 from io import StringIO
@@ -26,6 +20,26 @@ from google.oauth2 import service_account
 from pydantic import BaseModel
 
 
+"""
+Script to download G2P records and associated mined publications and to assess the
+relevance of each publication to the G2P record using Google Vertex AI Gemini models.
+
+Usage:
+    1) Download G2P records and associated mined publications
+    $ python gemini_publication_analyser.py init g2p_records.json
+
+    2) Assess the relevance for 300 publications
+    $ python gemini_publication_analyser.py process --config config.ini --limit 300 g2p_records.json
+
+The config.ini file should contain the following entries:
+    [project_config]
+    key_file = path/to/key_file.json
+    project = your-project-id
+    location = europe-west2
+    model = gemini-2.5-flash
+"""
+
+
 def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(required=True)
@@ -37,10 +51,10 @@ def main():
     p2 = subparsers.add_parser("process")
     p2.add_argument("infile", type=Path, help="Input JSON file")
     p2.add_argument(
-        "--key_file",
+        "--config",
         type=Path,
         required=True,
-        help="Google Vertex AI key (json file)"
+        help="Config file with Google Vertex AI settings(key file, project name, model, etc.)",
     )
     p2.add_argument(
         "-l",
@@ -55,17 +69,6 @@ def main():
         type=str,
         default=None,
         help="Process only records with specific confidence value (default: all)",
-    )
-    p2.add_argument(
-        "-m",
-        "--model",
-        default="gemini-2.5-flash",
-        help="Gemini model (default: gemini-2.5-flash)",
-    )
-    p2.add_argument(
-        "--location",
-        default="europe-west2",
-        help="Location for the Gemini model (default: europe-west2)",
     )
     p2.add_argument(
         "--rpm",
@@ -96,12 +99,26 @@ def run_process(args):
     with args.infile.open("rt") as fh:
         records = json.load(fh)
 
-    credentials = load_json_key(args.key_file)
+    # Read config file
+    config_parser = configparser.ConfigParser()
+    config_parser.read(args.config)
+    config = config_parser["project_config"]
+
+    if "key_file" not in config or "project" not in config:
+        sys.exit("Error: 'key_file' or 'project' not found in config file")
+
+    credentials = load_json_key(config["key_file"])
+
+    if "location" not in config:
+        config["location"] = "europe-west2" # default location
+
+    if "model" not in config:
+        config["model"] = "gemini-2.5-flash" # default model
 
     client = genai.Client(
         vertexai=True,
-        project="prj-int-dev-paradigm-g2p",
-        location=args.location, # gemini pro is available at us-central1; flash is in europe-west2
+        project=config["project"],
+        location=config["location"], # gemini pro is available at us-central1; flash is in europe-west2
         credentials=credentials,
         http_options=HttpOptions(api_version="v1")
     )
@@ -130,7 +147,7 @@ def run_process(args):
 
                 pub.update(**article)
 
-                relevance = process_publication(client, record, pub, args.model)
+                relevance = process_publication(client, record, pub, config["model"])
                 pub["status"] = relevance.label.value
                 pub["comment"] = relevance.comment
 
@@ -304,10 +321,15 @@ def get_article(pmid: int) -> dict | None:
     parser = PlainTextExtractor()
     parser.feed(abstract)
 
+    if "journalInfo" not in data["result"]:
+        journal_info = "Unknown"
+    else:
+        journal_info = data["result"]["journalInfo"]["journal"]["title"]
+
     return {
         "title": title,
         "abstract": parser.get_text(),
-        "journal": data["result"]["journalInfo"]["journal"]["title"],
+        "journal": journal_info,
         "fulltext": full_text,
     }
 
