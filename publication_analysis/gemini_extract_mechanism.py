@@ -207,7 +207,7 @@ Only extract mechanisms that are explicitly and experimentally demonstrated in \
 the text. Acceptable mechanisms must be supported by functional evidence or \
 experimental assays described in the publication (e.g. "loss of function", "gain of function", "dominant negative"). \
 Mechanisms must not be inferred from computational predictions (SIFT, PolyPhen), population data, \
-phenotype correlations, or assumptions. Only use wording from the text or minimal paraphrase for clarity.
+phenotype correlations or assumptions. Only use wording from the text or minimal paraphrase for clarity.
 - mechanism_evidence: functional assay evidence directly supporting the \
 stated mechanism of disease for the specified gene-disease pair. \
 Only extract evidence if the publication explicitly describes a functional \
@@ -219,7 +219,7 @@ protein expression or activity measurements; protein-protein or molecular intera
 cellular localization studies; rescue experiments, overexpression or \
 knockdown/knockin studies; gene editing (CRISPR, morpholino) in cells or model organisms; \
 assays in cell culture, mouse, zebrafish, Drosophila, or other systems; binding, \
-enzymatic, or reporter assays \
+enzymatic, or reporter assays. \
 Use the following keywords to identify functional assay evidence in the text: \
 functional assays, mechanism, protein interaction, protein expression, interaction, expression, \
 cells, cell culture, model organism, rescue, overexpression, gene editing, \
@@ -234,6 +234,10 @@ Only extract information if: \
 - the gene and the disease are explicitly linked in the text \
 - the mechanism or evidence is explicitly described
 
+Do not extract information if: \
+- the evidence is based on functional studies from previous studies or publications \
+- the evidence is based on computational predictions, population data, phenotype correlations or assumptions
+
 If the disease mentioned in the publication does not match the specified disease \
 or if the gene-disease association is not explicitly supported \
 return 'not found' for fields mechanism and mechanism_evidence.
@@ -243,7 +247,7 @@ Gene: {record['gene']}
 Disease: {record['disease']}
 Title: {article['title']}
 Abstract: {article['abstract']}
-Journal: {article['journal']}\
+Journal: {article['journal']}
 """
     if article['fulltext']:
         prompt += "\nFull text: "+article['fulltext']
