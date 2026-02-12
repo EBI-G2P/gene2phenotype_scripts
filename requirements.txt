@@ -5,5 +5,5 @@ lxml==6.0.2
 openpyxl==3.1.5
 typing_extensions==4.15.0
 google-auth==2.45.0
-google-genai==1.61.0
+google-genai==1.63.0
 urllib3==2.6.3
