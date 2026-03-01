@@ -1,4 +1,4 @@
-pandas==2.3.3
+pandas==3.0.1
 fpdf2==2.8.5
 sentence-transformers==5.2.0
 lxml==6.0.2
