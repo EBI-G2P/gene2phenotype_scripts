@@ -45,6 +45,12 @@ def main():
     subparsers = parser.add_subparsers(required=True)
 
     p1 = subparsers.add_parser("init")
+    p1.add_argument(
+        "--type",
+        type=str,
+        default="mined",
+        help="Download 'curated' or 'mined' publications",
+    )
     p1.add_argument("output", type=Path, help="Output JSON file")
     p1.set_defaults(func=run_download)
 
@@ -71,10 +77,7 @@ def main():
         help="Process only records with specific confidence value (default: all)",
     )
     p2.add_argument(
-        "--rpm",
-        type=int,
-        default=10,
-        help="Max requests per minute (default: 10)"
+        "--rpm", type=int, default=10, help="Max requests per minute (default: 10)"
     )
     p2.set_defaults(func=run_process)
 
@@ -87,12 +90,57 @@ def run_download(args):
     Calls method to download the G2P records.
     Writes the records to a json file.
     """
-    if args.output.is_file():
-       sys.exit(f"File '{args.output}' already exists")
+    # Latest G2P records
+    records = download_g2p(args.type)
 
-    with args.output.open("wt") as fh:
-        records = download_g2p()
-        json.dump(records, fh, indent=2)
+    # Read the existing json file and determine if there are new records
+    # to append to the file
+    if args.output.is_file():
+        print(f"[INFO] Appending new data to existing file {args.output}")
+        with args.output.open("r") as fh:
+            original_data = json.load(fh)
+
+        # Create dict of new record ids and associated publication ids
+        latest_record_ids_list = {}
+        for new_record in records:
+            latest_record_ids_list[new_record["id"]] = {
+                "pmids": [],
+                "record": new_record,
+            }
+            for publication in new_record["publications"]:
+                latest_record_ids_list[new_record["id"]]["pmids"].append(
+                    publication["id"]
+                )
+
+        # Create dict of current record ids and associated publication ids
+        current_record_ids_list = {}
+        for record in original_data:
+            current_record_ids_list[record["id"]] = {"pmids": [], "record": record}
+            for publication in record["publications"]:
+                current_record_ids_list[record["id"]]["pmids"].append(publication["id"])
+
+        for g2p_id in latest_record_ids_list:
+            if g2p_id not in current_record_ids_list:
+                original_data.append(latest_record_ids_list[g2p_id]["record"])
+            # else:
+            #     # The G2P record is in the current file
+            #     # Check if there are new publications
+            #     current_publication_list = current_record_ids_list[g2p_id]["pmids"]
+            #     new_publication_list = latest_record_ids_list[g2p_id]["pmids"]
+
+            #     diff_publication_list = list(set(new_publication_list) - set(current_publication_list))
+            #     if diff_publication_list:
+            #         print("\nNew publications:", g2p_id, diff_publication_list)
+            #         for pmid_to_add in diff_publication_list:
+            #             print("Add PMID:", pmid_to_add)
+
+        with args.output.open("wt") as fh:
+            json.dump(original_data, fh, indent=2)
+
+    else:
+        print(f"[INFO] Generating new file {args.output}")
+        with args.output.open("wt") as fh:
+            json.dump(records, fh, indent=2)
 
 
 def run_process(args):
@@ -110,22 +158,24 @@ def run_process(args):
     credentials = load_json_key(config["key_file"])
 
     if "location" not in config:
-        config["location"] = "europe-west2" # default location
+        config["location"] = "europe-west2"  # default location
 
     if "model" not in config:
-        config["model"] = "gemini-2.5-flash" # default model
+        config["model"] = "gemini-2.5-flash"  # default model
 
     client = genai.Client(
         vertexai=True,
         project=config["project"],
-        location=config["location"], # gemini pro is available at us-central1; flash is in europe-west2
+        location=config[
+            "location"
+        ],  # gemini pro is available at us-central1; flash is in europe-west2
         credentials=credentials,
-        http_options=HttpOptions(api_version="v1")
+        http_options=HttpOptions(api_version="v1"),
     )
 
     try:
         done = 0
-        
+
         if args.rpm > 0:
             secs = 60.0 / args.rpm
         else:
@@ -156,7 +206,7 @@ def run_process(args):
                     print("", file=sys.stderr)
 
                 if "mechanism" in record:
-                    mechanism_value = record['mechanism']
+                    mechanism_value = record["mechanism"]
                 else:
                     mechanism_value = "undetermined"
 
@@ -171,7 +221,7 @@ def run_process(args):
                 done += 1
                 if done == args.limit:
                     return
-                
+
                 time.sleep(secs)
     finally:
         with args.infile.open("wt") as fh:
@@ -179,7 +229,9 @@ def run_process(args):
 
 
 def load_json_key(key_file):
-    credentials = service_account.Credentials.from_service_account_file(key_file).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
+    credentials = service_account.Credentials.from_service_account_file(
+        key_file
+    ).with_scopes(["https://www.googleapis.com/auth/cloud-platform"])
     return credentials
 
 
@@ -239,18 +291,18 @@ If the publication discusses multiple genes or structural variants involving \
 the specified gene then assign "low" relevance.
 
 Input:
-Gene: {record['gene']}
-Previous gene symbols: {record['previous_gene_symbols']}
-Disease: {record['disease']}
-Title: {article['title']}
-Abstract: {article['abstract']}
-Journal: {article['journal']}\
+Gene: {record["gene"]}
+Previous gene symbols: {record["previous_gene_symbols"]}
+Disease: {record["disease"]}
+Title: {article["title"]}
+Abstract: {article["abstract"]}
+Journal: {article["journal"]}\
 """
     if "mechanism" in record:
-        prompt += "\nMolecular mechanism: "+record['mechanism']
+        prompt += "\nMolecular mechanism: " + record["mechanism"]
 
-    if article['fulltext']:
-        prompt += "\nFull text: "+article['fulltext']
+    if article["fulltext"]:
+        prompt += "\nFull text: " + article["fulltext"]
 
     response = client.models.generate_content(
         model=model,
@@ -286,7 +338,9 @@ def get_article(pmid: int) -> dict | None:
                 xml_data = response.read()
                 root = ET.fromstring(xml_data)
                 title = root.findtext(".//article-title")
-                abstract = " ".join(p.text.strip() for p in root.findall(".//abstract/p") if p.text)
+                abstract = " ".join(
+                    p.text.strip() for p in root.findall(".//abstract/p") if p.text
+                )
                 sections = []
                 for sec in root.findall(".//body/*"):
                     sec_title = sec.findtext("title")
@@ -296,7 +350,7 @@ def get_article(pmid: int) -> dict | None:
                     for p in sec.findall("p"):
                         text = get_text_clean(p)
                         paragraphs.append(text.replace("\n", " "))
-                    
+
                     # Other sections have sub-sections inside
                     for sub_section in sec.findall("sec"):
                         for p in sub_section.findall("p"):
@@ -308,9 +362,9 @@ def get_article(pmid: int) -> dict | None:
                 full_text = ""
                 for sec_title, paras in sections:
                     if sec_title:
-                        full_text += "\n"+sec_title+"\n"
+                        full_text += "\n" + sec_title + "\n"
                     for p in paras:
-                        full_text += " "+p
+                        full_text += " " + p
         except HTTPError as e:
             print(f"Error {e.code}: Full text not found for PMID {pmid}")
 
@@ -333,6 +387,7 @@ def get_article(pmid: int) -> dict | None:
         "journal": journal_info,
         "fulltext": full_text,
     }
+
 
 def get_text_clean(element):
     """
@@ -360,6 +415,7 @@ def get_text_clean(element):
 
     return "".join(parts)
 
+
 class PlainTextExtractor(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -373,15 +429,20 @@ class PlainTextExtractor(HTMLParser):
         return " ".join(self.chunks)
 
 
-def download_g2p() -> list[dict]:
+def download_g2p(publications_type) -> list[dict]:
     """
     Method to download the G2P data from the API.
     It returns a list of all G2P records.
     """
     records = []
 
+    if publications_type == "mined":
+        column = "additional mined publications"
+    else:
+        column = "publications"
+
     # Download the DD data from the live API
-    url = "https://www.ebi.ac.uk/gene2phenotype/api/panel/dd/download/"
+    url = "https://www.ebi.ac.uk/gene2phenotype/api/panel/all/download/"
     with urlopen(url) as res:
         data = res.read().decode("utf-8")
 
@@ -393,7 +454,7 @@ def download_g2p() -> list[dict]:
         obj = dict(zip(keys, values))
 
         publications = []
-        for e in obj["additional mined publications"].split(";"):
+        for e in obj[column].split(";"):
             e = e.strip()
             if e:
                 publications.append(
@@ -408,13 +469,13 @@ def download_g2p() -> list[dict]:
                 )
 
         record_to_append = {
-                "id": obj["g2p id"],
-                "gene": obj["gene symbol"],
-                "previous_gene_symbols": obj["previous gene symbols"],
-                "disease": obj["disease name"],
-                "confidence": obj["confidence"],
-                "publications": publications,
-            }
+            "id": obj["g2p id"],
+            "gene": obj["gene symbol"],
+            "previous_gene_symbols": obj["previous gene symbols"],
+            "disease": obj["disease name"],
+            "confidence": obj["confidence"],
+            "publications": publications,
+        }
         if obj["molecular mechanism"] != "undetermined":
             record_to_append["mechanism"] = obj["molecular mechanism"]
 
