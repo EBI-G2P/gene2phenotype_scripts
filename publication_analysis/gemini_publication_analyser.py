@@ -150,6 +150,7 @@ def run_process(args):
                 relevance = process_publication(client, record, pub, config["model"])
                 pub["status"] = relevance.label.value
                 pub["comment"] = relevance.comment
+                pub["ai_model"] = config["model"]
 
                 if done:
                     print("", file=sys.stderr)
