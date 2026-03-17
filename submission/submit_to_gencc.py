@@ -92,8 +92,15 @@ def write_to_the_GenCC_file(
         for record in records_data:
             # Action 'U' (delete) should be written to the file first
             # The record object has different format from the other actions
-            action = record["action"]
-            submission_id = record["sgc_id"]
+            try:
+                action = record["action"]
+            except KeyError:
+                action = "N"
+
+            try:
+                submission_id = record["sgc_id"]
+            except KeyError:
+                submission_id = ""
 
             if action == "U":
                 line_to_output = f"{submission_id}\t{action}\n"
@@ -410,7 +417,7 @@ def main():
         outfile = write_to_the_GenCC_file(
             g2p_data, output_file, output_file_issues
         )
-        print("\nHandling new submission... done")
+        print("Handling new submission... done")
     else:
         print("\nHandling existing submission...")
         print(f"Getting G2P data from GenCC file {args.gencc_file}")
@@ -427,8 +434,9 @@ def main():
 
     print("\nConverting text file to Excel file...")
     convert_txt_to_excel(outfile, final_output_file)
-    convert_txt_to_excel(outfile_updated_records, final_output_file_updated)
-    convert_txt_to_excel(outfile_deleted_records, final_output_file_deleted)
+    if not args.new_submission:
+        convert_txt_to_excel(outfile_updated_records, final_output_file_updated)
+        convert_txt_to_excel(outfile_deleted_records, final_output_file_deleted)
     print("Converting text file to Excel file... done")
 
 
