@@ -266,7 +266,8 @@ not just related systems).
 mechanistically relevant or closely related context, but without \
 demonstrating a direct association between the two. \
 The disease context should still be similar \
-(e.g. same system or phenotype family).
+(e.g. same phenotype family or allelic requirement) and the article should provide \
+new evidence for the gene-disease association.
 - low: the article discusses the gene or disease in an unrelated context, \
 or links the gene to a different disease than the one specified or focuses on \
 a different gene.
