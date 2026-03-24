@@ -11,7 +11,10 @@ import requests
 
 
 """
-    Script to merge G2P records.
+    Important note: This script is kept for historical reasons.
+                    To merge records you can use the endpoint merge_records/ directly.
+
+    Description: Script to merge G2P records.
 
     Options:
             --config : Config file name containing the G2P API URL (mandatory)
@@ -32,10 +35,10 @@ import requests
 EXPECTED_COLUMNS = [
     "g2p id to keep",
     "g2p ids to merge",
-    "gene",
-    "disease name",
-    "genotype",
-    "mechanism",
+    "gene", # gene of the g2p id to keep
+    "disease name", # disease of the g2p id to keep
+    "genotype", # genotype of the g2p id to keep
+    "mechanism", # mechanism of the g2p id to keep
 ]
 
 
@@ -112,10 +115,10 @@ def process_records(
         for line in records:
             g2p_id_to_keep = line["g2p id to keep"].strip()
             g2p_ids_merge = [x.strip() for x in line["g2p ids to merge"].split(",")]
-            gene = line["gene"].strip()
-            disease_name = line["disease name"].strip()
-            genotype = line["genotype"].strip()
-            mechanism = line["mechanism"].strip()
+            gene = line["gene"].strip() # gene symbol of the g2p_id_to_keep
+            disease_name = line["disease name"].strip() # disease of the g2p_id_to_keep
+            genotype = line["genotype"].strip() # genotype of the g2p_id_to_keep
+            mechanism = line["mechanism"].strip() # mechanism of the g2p_id_to_keep
 
             if not g2p_id_to_keep.startswith("G2P"):
                 wr.write(
@@ -149,7 +152,11 @@ def process_records(
                     else:
                         # Create output
                         records_to_merge.append(
-                            {"g2p_ids": g2p_ids_merge, "final_g2p_id": g2p_id_to_keep}
+                            {
+                                "g2p_ids": g2p_ids_merge,
+                                "final_g2p_id": g2p_id_to_keep,
+                                "add_disease_synonym": True
+                            }
                         )
                         wr_merge.write(
                             f"Merge {line['g2p ids to merge']} into {g2p_id_to_keep}\n"
