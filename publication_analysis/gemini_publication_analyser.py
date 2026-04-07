@@ -122,17 +122,19 @@ def run_download(args):
         for g2p_id in latest_record_ids_list:
             if g2p_id not in current_record_ids_list:
                 original_data.append(latest_record_ids_list[g2p_id]["record"])
-            # else:
-            #     # The G2P record is in the current file
-            #     # Check if there are new publications
-            #     current_publication_list = current_record_ids_list[g2p_id]["pmids"]
-            #     new_publication_list = latest_record_ids_list[g2p_id]["pmids"]
+            else:
+                # The G2P record is in the current file
+                # Check if there are new publications
+                current_publication_list = current_record_ids_list[g2p_id]["pmids"]
+                new_publication_list = latest_record_ids_list[g2p_id]["pmids"]
 
-            #     diff_publication_list = list(set(new_publication_list) - set(current_publication_list))
-            #     if diff_publication_list:
-            #         print("\nNew publications:", g2p_id, diff_publication_list)
-            #         for pmid_to_add in diff_publication_list:
-            #             print("Add PMID:", pmid_to_add)
+                diff_publication_list = list(set(new_publication_list) - set(current_publication_list))
+                # If there are new publications, append them to the existing record in the original data
+                if diff_publication_list:
+                    existing_record = current_record_ids_list[g2p_id]["record"]
+                    for pub in latest_record_ids_list[g2p_id]["record"]["publications"]:
+                        if pub["id"] in diff_publication_list:
+                            existing_record["publications"].append(pub)
 
         with args.output.open("wt") as fh:
             json.dump(original_data, fh, indent=2)
