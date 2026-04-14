@@ -159,7 +159,14 @@ def prepare_draft_records(
                     final_draft["variant_descriptions"] = []
                     final_draft["variant_consequences"] = []
 
-                    final_draft["confidence"] = record["confidence"].lower()
+                    # Add source details to JSON
+                    final_draft["source_data"] = {"name": source}
+                    if "url" in record:
+                        final_draft["source_data"]["url"] = record["url"]
+
+                    final_draft["confidence"] = ""
+                    # Save the confidence in the source field
+                    final_draft["source_data"]["confidence"] = record["confidence"].lower()
                     if "confidence" in record["comments"]:
                         final_draft["extra_comment"] += (
                             "Confidence comment: "
@@ -207,6 +214,7 @@ def prepare_draft_records(
                         )
 
                     # Mechanism
+                    final_draft["source_data"]["mechanism_comment"] = ""
                     # Check if the mechanism value is valid, if not add it to the extra_comment
                     valid_mechanism = ""
                     if (
@@ -214,28 +222,24 @@ def prepare_draft_records(
                         and record["mechanism"].lower().replace("-", " ")
                         not in valid_mechanisms
                     ):
-                        final_draft["extra_comment"] += (
-                            "Unsupported mechanism: " + record["mechanism"] + "\n"
+                        final_draft["source_data"]["mechanism_comment"] += (
+                            "Unsupported mechanism: " + record["mechanism"]
                         )
                     else:
                         valid_mechanism = record["mechanism"].lower().replace("-", " ")
 
                     final_draft["molecular_mechanism"] = {
-                        "name": valid_mechanism,
+                        "name": "",
                         "support": "inferred",
                     }
                     final_draft["mechanism_synopsis"] = []
                     # Mechanism evidence
                     final_draft["mechanism_evidence"] = []
-                    final_draft["extra_comment"] += (
-                        "Mechanism evidence: " + "; ".join(record["evidence"]) + "\n"
-                    )
+                    # Save mechanism, mechanism evidence and comment in the source field
+                    final_draft["source_data"]["mechanism"] = valid_mechanism
+                    final_draft["source_data"]["mechanism_evidence"] = "; ".join(record["evidence"])
                     if "mechanism" in record["comments"]:
-                        final_draft["extra_comment"] += (
-                            "Mechanism comment: "
-                            + record["comments"]["mechanism"]
-                            + "\n"
-                        )
+                        final_draft["source_data"]["mechanism_comment"] += "\n" + record["comments"]["mechanism"]
 
                     # Disease
                     disease_cross_references = []
@@ -269,15 +273,15 @@ def prepare_draft_records(
                                     }
                                 )
                     final_draft["disease"] = {
-                        "disease_name": f"{record['gene_symbol']}-related {record['disease']}",
-                        "cross_references": disease_cross_references,
+                        "disease_name": "",
+                        "cross_references": [],
                     }
-
-                    if "url" in record:
-                        final_draft["extra_comment"] += "URL: " + record["url"] + "\n"
+                    # Save the disease name and cross references in the source field
+                    final_draft["source_data"]["disease"] = record["disease"]
+                    final_draft["source_data"]["disease_cross_references"] = disease_cross_references
 
                     final_draft["session_name"] = (
-                        f"{source}_{record['gene_symbol']}_{final_draft['confidence']}_{final_draft['allelic_requirement']}"
+                        f"{source}_{record['gene_symbol']}_{final_draft['allelic_requirement']}"
                     )
 
                     # Check if the draft already exists based on:
@@ -286,8 +290,8 @@ def prepare_draft_records(
                         existing_draft = automatic_drafts[final_draft["session_name"]]
                         if (
                             existing_draft["locus"] == final_draft["locus"]
-                            and existing_draft["disease"].lower()
-                            == final_draft["disease"]["disease_name"].lower()
+                            and existing_draft["disease"]
+                            == final_draft["disease"]["disease_name"]
                             and existing_draft["allelic_requirement"]
                             == final_draft["allelic_requirement"]
                         ):
@@ -303,9 +307,9 @@ def prepare_draft_records(
 
                     # Call G2P API to insert the curation draft
                     insert_draft_record(
-                        api_url,
-                        cookies,
-                        {"json_data": final_draft, "status": "automatic"},
+                         api_url,
+                         cookies,
+                         {"json_data": final_draft, "status": "automatic"},
                     )
 
 
