@@ -536,11 +536,6 @@ def main():
     config = configparser.ConfigParser()
     config.read(config_file)
 
-    db_host = config["ensembl_database"]["host"]
-    db_port = int(config["ensembl_database"]["port"])
-    db_name = config["ensembl_database"]["name"]
-    user = config["ensembl_database"]["user"]
-    password = config["ensembl_database"]["password"]
     g2p_db_host = config["g2p_database"]["host"]
     g2p_db_port = int(config["g2p_database"]["port"])
     g2p_db_name = config["g2p_database"]["name"]
@@ -554,6 +549,12 @@ def main():
 
     ### Import or update OMIM ###
     if args.omim:
+        db_host = config["ensembl_database"]["host"]
+        db_port = int(config["ensembl_database"]["port"])
+        db_name = config["ensembl_database"]["name"]
+        user = config["ensembl_database"]["user"]
+        password = config["ensembl_database"]["password"]
+
         # Get version from Ensembl db name
         version = re.search("[0-9]+", db_name)
         print(f"INFO: going to import OMIM data from Ensembl {version.group()}")
