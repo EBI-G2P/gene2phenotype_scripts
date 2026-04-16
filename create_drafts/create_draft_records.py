@@ -3,13 +3,9 @@
 import sys
 import argparse
 import configparser
-import csv
-import io
-import re
 import os.path
 import requests
 import json
-from typing import List, Dict
 
 
 """
@@ -30,6 +26,12 @@ valid_mechanisms = [
     "undetermined non loss of function",
     "undetermined",
 ]
+
+allelic_requirement_mapping = {
+    "autosomal recessive": "biallelic_autosomal",
+    "autosomal dominant": "monoallelic_autosomal",
+    "X-linked": "monoallelic_X",
+}
 
 
 def login(
@@ -115,6 +117,7 @@ def fetch_disease_info(api_url: str, disease_id: str) -> dict:
 
 def prepare_draft_records(
     input_file: str,
+    panel_name: str,
     source: str,
     automatic_drafts: dict,
     api_url: str,
@@ -151,7 +154,7 @@ def prepare_draft_records(
                         )
 
                     final_draft["locus"] = record["gene_symbol"]
-                    final_draft["panels"] = ["Ear disorders"]
+                    final_draft["panels"] = [panel_name]
                     final_draft["public_comment"] = ""
                     final_draft["private_comment"] = ""
                     final_draft["cross_cutting_modifier"] = []
@@ -166,7 +169,9 @@ def prepare_draft_records(
 
                     final_draft["confidence"] = ""
                     # Save the confidence in the source field
-                    final_draft["source_data"]["confidence"] = record["confidence"].lower()
+                    final_draft["source_data"]["confidence"] = record[
+                        "confidence"
+                    ].lower()
                     if "confidence" in record["comments"]:
                         final_draft["extra_comment"] += (
                             "Confidence comment: "
@@ -200,12 +205,13 @@ def prepare_draft_records(
 
                     # Format allelic requirement
                     final_draft["allelic_requirement"] = ""
-                    if record["allelic_requirement"] == "autosomal recessive":
-                        final_draft["allelic_requirement"] = "biallelic_autosomal"
-                    elif record["allelic_requirement"] == "autosomal dominant":
-                        final_draft["allelic_requirement"] = "monoallelic_autosomal"
-                    elif record["allelic_requirement"] == "X-linked":
-                        final_draft["allelic_requirement"] = "monoallelic_X"
+                    if (
+                        record["allelic_requirement"]
+                        in allelic_requirement_mapping.keys()
+                    ):
+                        final_draft["allelic_requirement"] = (
+                            allelic_requirement_mapping[record["allelic_requirement"]]
+                        )
                     else:
                         final_draft["extra_comment"] += (
                             "Unsupported allelic requirement: "
@@ -237,9 +243,13 @@ def prepare_draft_records(
                     final_draft["mechanism_evidence"] = []
                     # Save mechanism, mechanism evidence and comment in the source field
                     final_draft["source_data"]["mechanism"] = valid_mechanism
-                    final_draft["source_data"]["mechanism_evidence"] = "; ".join(record["evidence"])
+                    final_draft["source_data"]["mechanism_evidence"] = "; ".join(
+                        record["evidence"]
+                    )
                     if "mechanism" in record["comments"]:
-                        final_draft["source_data"]["mechanism_comment"] += "\n" + record["comments"]["mechanism"]
+                        final_draft["source_data"]["mechanism_comment"] += (
+                            "\n" + record["comments"]["mechanism"]
+                        )
 
                     # Disease
                     disease_cross_references = []
@@ -278,38 +288,27 @@ def prepare_draft_records(
                     }
                     # Save the disease name and cross references in the source field
                     final_draft["source_data"]["disease"] = record["disease"]
-                    final_draft["source_data"]["disease_cross_references"] = disease_cross_references
-
-                    final_draft["session_name"] = (
-                        f"{source}_{record['gene_symbol']}_{final_draft['allelic_requirement']}"
+                    final_draft["source_data"]["disease_cross_references"] = (
+                        disease_cross_references
                     )
 
-                    # Check if the draft already exists based on:
-                    # session name, gene, disease and allelic requirement
+                    # Build the session name using gene, allelic requirement and disease to check for duplicates before inserting the draft
+                    final_draft["session_name"] = (
+                        f"{record['gene_symbol']}_{final_draft['allelic_requirement']}_{record['disease']}"
+                    )
+
+                    # Check if the draft already exists based on the session name
                     if final_draft["session_name"] in automatic_drafts:
-                        existing_draft = automatic_drafts[final_draft["session_name"]]
-                        if (
-                            existing_draft["locus"] == final_draft["locus"]
-                            and existing_draft["disease"]
-                            == final_draft["disease"]["disease_name"]
-                            and existing_draft["allelic_requirement"]
-                            == final_draft["allelic_requirement"]
-                        ):
-                            print(
-                                f"Draft record for session '{final_draft['session_name']}' already exists. Skipping insertion."
-                            )
-                            continue
-                        else:
-                            print(
-                                f"Draft record for session '{final_draft['session_name']}' already exists but with different data. Consider reviewing it before inserting a new draft."
-                            )
-                            continue
+                        print(
+                            f"Draft record for session '{final_draft['session_name']}' already exists. Skipping insertion."
+                        )
+                        continue
 
                     # Call G2P API to insert the curation draft
                     insert_draft_record(
-                         api_url,
-                         cookies,
-                         {"json_data": final_draft, "status": "automatic"},
+                        api_url,
+                        cookies,
+                        {"json_data": final_draft, "status": "automatic"},
                     )
 
 
@@ -324,10 +323,14 @@ def main():
     parser.add_argument(
         "--config", required=True, help="Config file with details to G2P API"
     )
+    parser.add_argument(
+        "--panel", required=True, help="G2P panel name e.g. 'Ear disorders'"
+    )
     args = parser.parse_args()
 
     input_file = args.input_file
     source = args.source
+    panel_name = args.panel
     output_file = f"{source}_draft_records_created.json"
 
     # Load the config file
@@ -352,7 +355,7 @@ def main():
     automatic_drafts = get_all_automatic_drafts(api_url, cookies)
 
     prepare_draft_records(
-        input_file, source.lower(), automatic_drafts, api_url, cookies
+        input_file, panel_name, source.lower(), automatic_drafts, api_url, cookies
     )
 
     logout(api_url, cookies)
