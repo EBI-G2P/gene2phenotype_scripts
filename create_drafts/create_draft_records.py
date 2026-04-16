@@ -121,7 +121,7 @@ def prepare_draft_records(
     cookies: requests.cookies.RequestsCookieJar,
 ) -> None:
     """
-    Read the ClinGen json file
+    Read the input json file
     """
     existing_records = []
 
