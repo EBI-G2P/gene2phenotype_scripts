@@ -9,7 +9,6 @@ import re
 import os.path
 import requests
 import json
-from typing import List, Dict
 
 
 """
@@ -127,7 +126,6 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) ->
             if record["clingen_panel"] != "Hearing Loss Gene Curation Expert Panel":
                 continue
             total_records += 1
-            print("\n->", record)
 
             # Format the mechanism evidence to the expected format
             new_mechanism_evidence = []
@@ -162,14 +160,12 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) ->
                         if new_g2p_disease.strip() == new_clingen_disease.strip():
                             found_disease = True
                 if not found_disease:
-                    print(f"--- {gene}: {g2p_data_by_gene[gene]}")
                     records_to_check += 1
                     record["type"] = "probably_create"
                     record["g2p_data"] = g2p_data_by_gene[gene]
                     drafts_to_create.append(record)
             else:
                 # Gene not yet curated in G2P
-                print(f"NEW {gene}")
                 new_records += 1
                 record["type"] = "create"
                 record["g2p_data"] = "NA"
@@ -313,13 +309,8 @@ def process_panelapp_data(
             else:
                 draft_record["type"] = "create"
 
-            # print(f"\n-> {draft_record}")
-
             drafts_to_create.append(draft_record)
             new_records += 1
-
-        # print("\nTotal records:", total_records)
-        # print("New records:", new_records)
 
         with open(output_file, "wt") as wr:
             json.dump(drafts_to_create, wr, indent=2)
