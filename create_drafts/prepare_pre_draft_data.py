@@ -110,7 +110,7 @@ def process_g2p_records(g2p_records) -> list:
     return g2p_data_by_gene
 
 
-def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) -> None:
+def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, clingen_panel: str) -> None:
     """
     Read the ClinGen json file
     """
@@ -123,7 +123,7 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) ->
         data = json.load(fh)
         for record in data:
             found_disease = False
-            if record["clingen_panel"] != "Hearing Loss Gene Curation Expert Panel":
+            if record["clingen_panel"] != clingen_panel:
                 continue
             total_records += 1
 
@@ -131,12 +131,13 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) ->
             new_mechanism_evidence = []
             for mechanism_evidence in record["evidence"]:
                 if isinstance(mechanism_evidence, dict):
+                    mechanism_evidence_type = mechanism_evidence.get("type", "") or mechanism_evidence.get("evidence_type", "")
                     if "description" in mechanism_evidence:
-                        new_string = f"{mechanism_evidence['type']}: {mechanism_evidence['description']}"
+                        new_string = f"{mechanism_evidence_type}: {mechanism_evidence['description']}"
                     elif "evidence" in mechanism_evidence:
-                        new_string = f"{mechanism_evidence['type']}: {mechanism_evidence['evidence']}"
+                        new_string = f"{mechanism_evidence_type}: {mechanism_evidence['evidence']}"
                     else:
-                        new_string = f"{mechanism_evidence['type']}"
+                        new_string = f"{mechanism_evidence_type}"
                     new_mechanism_evidence.append(new_string)
             if new_mechanism_evidence:
                 record["evidence"] = new_mechanism_evidence
@@ -149,16 +150,10 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) ->
                     if g2p_record["mondo_id"] == record["mondo_id"]:
                         found_disease = True
                     else:
-                        # Check if it is the same disease
-                        new_g2p_disease = re.sub(
-                            ".*\-related ", "", g2p_record["disease"]
-                        )
-                        new_clingen_disease = record["disease"].replace(",", "")
-                        new_clingen_disease = re.sub(
-                            " type \d+", "", new_clingen_disease
-                        )
-                        if new_g2p_disease.strip() == new_clingen_disease.strip():
+                        # Check if it is the same disease using the disease name
+                        if panelapp_disease_matches_g2p(g2p_record["disease"], [{"name": record["disease"]}]):
                             found_disease = True
+
                 if not found_disease:
                     records_to_check += 1
                     record["type"] = "probably_create"
@@ -395,7 +390,7 @@ def main():
         help="Data to be used to create drafts (supported formats: json and tsv)",
     )
     parser.add_argument(
-        "--clingen_file", required=True, help="ClinGen data to append to PanelApp records (supported format: json)"
+        "--clingen_file", required=False, help="ClinGen data to append to PanelApp records (supported format: json)"
     )
     parser.add_argument(
         "--clingen_panel", required=True, help="ClinGen panel to append to PanelApp records"
@@ -448,7 +443,7 @@ def main():
     logout(api_url, cookies)
 
     if source.lower() == "clingen":
-        process_clingen_data(input_file, g2p_data_by_gene, output_file)
+        process_clingen_data(input_file, g2p_data_by_gene, output_file, clingen_panel)
 
     if source.lower() == "panelapp":
         katherine_list = {}
