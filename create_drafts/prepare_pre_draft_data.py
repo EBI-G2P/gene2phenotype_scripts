@@ -179,11 +179,51 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str) ->
         json.dump(drafts_to_create, wr, indent=2)
 
 
+def normalize_disease_name_for_comparison(disease_name: str) -> str:
+    """
+    Normalize disease names before comparing G2P and PanelApp records.
+    """
+    disease_name = re.sub(".*\\-related ", "", disease_name)
+    disease_name = disease_name.replace(",", "")
+    disease_name = re.sub(r"\s+type\s+\d+[A-Za-z]*\b", "", disease_name)
+    disease_name = re.sub(r"\s+\d+[A-Za-z]+\W*$", "", disease_name)
+    disease_name = re.sub(r"\s+dominant\W*$", "", disease_name, flags=re.IGNORECASE)
+    disease_name = re.sub(r"\s+", " ", disease_name)
+    return disease_name.strip().lower()
+
+
+def disease_word_order_key(disease_name: str) -> str:
+    """
+    Return a comparison key that ignores word order.
+    """
+    words = re.findall(r"[a-z0-9]+", disease_name)
+    return " ".join(sorted(words))
+
+
+def panelapp_disease_matches_g2p(g2p_disease: str, panelapp_diseases: list) -> bool:
+    """
+    Compare a G2P disease name with PanelApp disease names.
+    """
+    new_g2p_disease = normalize_disease_name_for_comparison(g2p_disease)
+    for disease in panelapp_diseases:
+        new_panelapp_disease = normalize_disease_name_for_comparison(disease["name"])
+
+        if (
+            new_g2p_disease == new_panelapp_disease
+            or disease_word_order_key(new_g2p_disease)
+            == disease_word_order_key(new_panelapp_disease)
+        ):
+            return True
+
+    return False
+
+
 def process_panelapp_data(
     file: str,
     g2p_data_by_gene: list,
     output_file: str,
     clingen_file: str,
+    clingen_panel: str,
     katherine_list: dict,
 ) -> None:
     total_records = 0
@@ -271,27 +311,15 @@ def process_panelapp_data(
             }
 
             # Add ClinGen data to the record
-            if model_of_inheritance == "MITOCHONDRIAL":
-                clingen_info = []
+            clingen_info = []
+            if gene_symbol in clingen_records:
                 clingen_list = clingen_records[gene_symbol]
                 for clingen_record in clingen_list:
-                    clingen_info.append(
-                        {
-                            "disease": clingen_record["disease"],
-                            "disease_id": clingen_record["disease_id"],
-                            "mondo_id": clingen_record["mondo_id"],
-                            "confidence": clingen_record["confidence"],
-                            "mechanism": clingen_record["mechanism"],
-                            "allelic_requirement": clingen_record[
-                                "allelic_requirement"
-                            ],
-                            "pmids": clingen_record["pmids"],
-                            "url": clingen_record["url"],
-                        }
-                    )
-                if clingen_info:
-                    draft_record["clingen_data"] = clingen_info
-            if gene_symbol in katherine_list:
+                    if clingen_record["clingen_panel"] == clingen_panel:
+                        clingen_info.append(clingen_record)
+            if clingen_info:
+                draft_record["clingen_data"] = clingen_info
+            if katherine_list and gene_symbol in katherine_list:
                 draft_record["katherine_schon_data"] = katherine_list[gene_symbol]
 
             # Check if gene is curated in G2P
@@ -299,7 +327,14 @@ def process_panelapp_data(
             found = False
             if gene_symbol in g2p_data_by_gene:
                 for g2p_record in g2p_data_by_gene[gene_symbol]:
-                    if g2p_record["omim_id"] in draft_record["disease_id"]:
+                    # Match records using the disease ids (omim or mondo)
+                    if (g2p_record["omim_id"] in draft_record["disease_id"]
+                        or g2p_record["mondo_id"] in draft_record["disease_id"]):
+                        found = True
+                    # Match records using the disease name
+                    elif panelapp_disease_matches_g2p(
+                        g2p_record["disease"], draft_record["phenotypes"]
+                    ):
                         found = True
                     draft_record["g2p_data"].append(g2p_record)
                 if not found:
@@ -360,12 +395,20 @@ def main():
         help="Data to be used to create drafts (supported formats: json and tsv)",
     )
     parser.add_argument(
-        "--clingen_file", required=False, help="ClinGen data (supported format: json)"
+        "--clingen_file", required=True, help="ClinGen data to append to PanelApp records (supported format: json)"
+    )
+    parser.add_argument(
+        "--clingen_panel", required=True, help="ClinGen panel to append to PanelApp records"
     )
     parser.add_argument(
         "--katherine_file",
         required=False,
         help="Katherine Schon MT gene list (supported format: json)",
+    )
+    parser.add_argument(
+        "--output_file",
+        required=False,
+        help="Output file name for pre-draft records (supported format: json)",
     )
     parser.add_argument(
         "--config", required=True, help="Config file with details to G2P API"
@@ -375,7 +418,12 @@ def main():
     input_file = args.input_file
     source = args.source
     clingen_file = args.clingen_file
+    clingen_panel = args.clingen_panel
     katherine_file = args.katherine_file
+    output_file = args.output_file
+
+    if not output_file:
+        output_file = f"{source}_pre_draft_records.json"
 
     # Load the config file
     config = configparser.ConfigParser()
@@ -399,15 +447,15 @@ def main():
     g2p_data_by_gene = process_g2p_records(g2p_records)
     logout(api_url, cookies)
 
-    output_file = f"{source}_pre_draft_records.json"
-
     if source.lower() == "clingen":
         process_clingen_data(input_file, g2p_data_by_gene, output_file)
 
     if source.lower() == "panelapp":
-        katherine_list = read_extra_file(katherine_file)
+        katherine_list = {}
+        if katherine_file:
+            katherine_list = read_extra_file(katherine_file)
         process_panelapp_data(
-            input_file, g2p_data_by_gene, output_file, clingen_file, katherine_list
+            input_file, g2p_data_by_gene, output_file, clingen_file, clingen_panel, katherine_list
         )
 
 
