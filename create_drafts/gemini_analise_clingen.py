@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import configparser
 import json
 import sys
 import time
@@ -40,16 +41,16 @@ def run_process(args):
         clingen_data = json.load(fh)
 
     # Get the Gemini model details from the config file
-    config = argparse.ConfigParser()
+    config = configparser.ConfigParser()
     config.read(args.config)
     try:
-        gemini_config = config["gemini_model"]
+        gemini_config = config["project_config"]
     except KeyError:
-        sys.exit("ERROR: 'gemini_model' missing from config file")
+        sys.exit("ERROR: 'project_config' missing from config file")
     args.key_file = gemini_config.get("key_file")
     args.model = gemini_config.get("model", "gemini-2.5-flash")
     args.location = gemini_config.get("location", "europe-west2")
-    args.project_name = gemini_config.get("project_name")
+    args.project_name = gemini_config.get("project")
 
     credentials = load_json_key(args.key_file)
 

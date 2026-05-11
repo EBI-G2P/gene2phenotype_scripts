@@ -16,7 +16,10 @@ Options:
         --input_file     Data to be used to create drafts (supported format: json)
 
 Example how to run:
-    python create_draft_records.py --source ClinGen --input_file clingen_reviewed_data.json
+    python create_draft_records.py \
+        --config config.ini \
+        --source ClinGen \
+        --input_file clingen_reviewed_data.json
 """
 
 valid_mechanisms = [
@@ -133,8 +136,9 @@ def prepare_draft_records(
         for record in data:
             final_draft = {}
 
-            if record["status"] == "approved" or record["status"] == "needs changes":
-                if "g2p_data" in record["comments"] and (
+            if (("status" in record and (record["status"] == "approved" or record["status"] == "needs changes"))
+                or ("type" in record and record["type"] != "in_g2p")):
+                if "comments" in record and "g2p_data" in record["comments"] and (
                     "matches the existing g2p" in record["comments"]["g2p_data"].lower()
                     or "draft matches" in record["comments"]["g2p_data"].lower()
                 ):
@@ -142,11 +146,11 @@ def prepare_draft_records(
                 else:
                     final_draft["extra_comment"] = ""
                     # Add an extra comment related to the necessary changes
-                    if record["status"] == "needs changes":
+                    if "status" in record and record["status"] == "needs changes":
                         final_draft["extra_comment"] += (
                             "Note: this draft needs changes" + "\n"
                         )
-                    if "g2p_data" in record["comments"]:
+                    if "comments" in record and "g2p_data" in record["comments"]:
                         final_draft["extra_comment"] += (
                             "Existing G2P data: "
                             + record["comments"]["g2p_data"]
@@ -169,10 +173,11 @@ def prepare_draft_records(
 
                     final_draft["confidence"] = ""
                     # Save the confidence in the source field
-                    final_draft["source_data"]["confidence"] = record[
-                        "confidence"
-                    ].lower()
-                    if "confidence" in record["comments"]:
+                    if "confidence" in record and record["confidence"] != "":
+                        final_draft["source_data"]["confidence"] = record[
+                            "confidence"
+                        ].lower()
+                    if "comments" in record and "confidence" in record["comments"]:
                         final_draft["extra_comment"] += (
                             "Confidence comment: "
                             + record["comments"]["confidence"]
@@ -199,9 +204,7 @@ def prepare_draft_records(
 
                     final_draft["phenotypes"] = []
                     if record["phenotypes"]:
-                        final_draft["extra_comment"] += (
-                            "Phenotypes: " + "; ".join(record["phenotypes"]) + "\n"
-                        )
+                        final_draft["source_data"]["phenotypes"] = record["phenotypes"]
 
                     # Format allelic requirement
                     final_draft["allelic_requirement"] = ""
@@ -224,7 +227,7 @@ def prepare_draft_records(
                     # Check if the mechanism value is valid, if not add it to the extra_comment
                     valid_mechanism = ""
                     if (
-                        record["mechanism"] != ""
+                        "mechanism" in record and record["mechanism"] != ""
                         and record["mechanism"].lower().replace("-", " ")
                         not in valid_mechanisms
                     ):
@@ -232,7 +235,8 @@ def prepare_draft_records(
                             "Unsupported mechanism: " + record["mechanism"]
                         )
                     else:
-                        valid_mechanism = record["mechanism"].lower().replace("-", " ")
+                        if "mechanism" in record and record["mechanism"] != "":
+                            valid_mechanism = record["mechanism"].lower().replace("-", " ")
 
                     final_draft["molecular_mechanism"] = {
                         "name": "",
@@ -243,17 +247,18 @@ def prepare_draft_records(
                     final_draft["mechanism_evidence"] = []
                     # Save mechanism, mechanism evidence and comment in the source field
                     final_draft["source_data"]["mechanism"] = valid_mechanism
-                    final_draft["source_data"]["mechanism_evidence"] = "; ".join(
-                        record["evidence"]
-                    )
-                    if "mechanism" in record["comments"]:
+                    if "evidence" in record and record["evidence"]:
+                        final_draft["source_data"]["mechanism_evidence"] = "; ".join(
+                            record["evidence"]
+                        )
+                    if "comments" in record and "mechanism" in record["comments"]:
                         final_draft["source_data"]["mechanism_comment"] += (
                             "\n" + record["comments"]["mechanism"]
                         )
 
                     # Disease
                     disease_cross_references = []
-                    if record["mondo_id"] != "":
+                    if "mondo_id" in record and record["mondo_id"] != "":
                         disease_data = fetch_disease_info(api_url, record["mondo_id"])
                         disease_cross_references.append(
                             {
@@ -263,7 +268,7 @@ def prepare_draft_records(
                                 "original_disease_name": disease_data["disease"],
                             }
                         )
-                    if record["disease_id"] != "":
+                    if "disease_id" in record and record["disease_id"] != "" and record["disease_id"] != []:
                         omim_list = record["disease_id"].split(",")
                         for omim_id in omim_list:
                             omim_id = omim_id.replace("OMIM:", "")
@@ -287,7 +292,8 @@ def prepare_draft_records(
                         "cross_references": [],
                     }
                     # Save the disease name and cross references in the source field
-                    final_draft["source_data"]["disease"] = record["disease"]
+                    if "disease" in record:
+                        final_draft["source_data"]["disease"] = record["disease"]
                     final_draft["source_data"]["disease_cross_references"] = (
                         disease_cross_references
                     )
@@ -326,12 +332,18 @@ def main():
     parser.add_argument(
         "--panel", required=True, help="G2P panel name e.g. 'Ear disorders'"
     )
+    parser.add_argument(
+        "--output_file", required=False, help="Output file to save the final draft records"
+    )
     args = parser.parse_args()
 
     input_file = args.input_file
     source = args.source
     panel_name = args.panel
-    output_file = f"{source}_draft_records_created.json"
+    output_file = args.output_file
+
+    if not output_file:
+        output_file = f"{source}_draft_records_created.json"
 
     # Load the config file
     config = configparser.ConfigParser()
