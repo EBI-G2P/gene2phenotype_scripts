@@ -32,8 +32,7 @@ Options:
 URL = (
     "https://rest.uniprot.org/uniprotkb/search"
     "?query=reviewed:true+AND+organism_id:9606"
-    "&fields=accession,gene_primary,cc_subunit"
-    "&size=500"
+    "&fields=accession,gene_primary,xref_hgnc,cc_subunit&size=500"
 )
 
 RE_NEXT_LINK = re.compile(r'<(.+)>; rel="next"')
@@ -134,19 +133,39 @@ def filter_subunit_text(subunit_text):
 
 
 def extract_gene_symbols(item):
-    gene_symbols = []
+    genes = []
     for gene in item.get("genes", []):
-        gene_name = gene.get("geneName", {}).get("value")
-        if gene_name:
-            gene_symbols.append(gene_name)
-    return gene_symbols
+        gene_symbol = gene.get("geneName", {}).get("value")
+        if gene_symbol:
+            genes.append(
+                {
+                    "gene_symbol": gene_symbol,
+                    "hgnc_id": extract_hgnc_id(item, gene_symbol),
+                }
+            )
+    return genes
+
+
+def extract_hgnc_id(item, gene_symbol):
+    for cross_reference in item.get("uniProtKBCrossReferences", []):
+        if cross_reference.get("database") != "HGNC":
+            continue
+
+        for property_item in cross_reference.get("properties", []):
+            if (
+                property_item.get("key") == "GeneName"
+                and property_item.get("value") == gene_symbol
+            ):
+                return cross_reference.get("id")
+
+    return None
 
 
 def fetch_subunit_data():
     """
     Fetches reviewed human UniProt entries with subunit annotations,
     and returns a list of dictionaries containing:
-    gene symbol, UniProt accession, original subunit information and filtered subunit information.
+    gene symbol, HGNC ID, UniProt accession, original subunit information and filtered subunit information.
     It only returns entries where the filtered subunit information is not empty.
     """
     rows = []
@@ -166,10 +185,11 @@ def fetch_subunit_data():
             if not processed_subunit_text:
                 continue
 
-            for gene_symbol in extract_gene_symbols(item):
+            for gene in extract_gene_symbols(item):
                 rows.append(
                     {
-                        "gene_symbol": gene_symbol,
+                        "gene_symbol": gene["gene_symbol"],
+                        "hgnc_id": gene["hgnc_id"],
                         "uniprot_accession": accession,
                         "subunit_information": subunit_text,
                         "subunit_information_filtered": processed_subunit_text,
