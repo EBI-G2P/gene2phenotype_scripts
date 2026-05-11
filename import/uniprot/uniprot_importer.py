@@ -29,7 +29,7 @@ Options:
 
 
 # Uniprot data fetch URL
-url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,xref_mim,xref_hgnc,gene_primary&size=500"
+url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,xref_hgnc,gene_primary&size=500"
 
 # Configuration to fetch Uniprot data
 re_next_link = re.compile(r'<(.+)>; rel="next"')
@@ -39,6 +39,15 @@ session.mount("https://", HTTPAdapter(max_retries=retries))
 
 # Global variable to store Uniprot release version
 uniprot_release = None
+
+
+def fetch_uniprot_release():
+    global uniprot_release
+    release_url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession&size=1"
+    response = session.get(release_url)
+    response.raise_for_status()
+    uniprot_release = response.headers["X-UniProt-Release"]
+    return uniprot_release
 
 
 def get_next_link(headers):
@@ -59,21 +68,24 @@ def get_batch(batch_url):
         batch_url = get_next_link(response.headers)
 
 
-def get_database_value(database, dataItem, gene_symbol):
+def get_hgnc_id(dataItem, gene_symbol=None):
     if "uniProtKBCrossReferences" in dataItem and len(
         dataItem["uniProtKBCrossReferences"]
     ):
         for item in dataItem["uniProtKBCrossReferences"]:
-            # Example: {'database': 'HGNC', 'id': 'HGNC:4764', 'properties': [{'key': 'GeneName', 'value': 'H3-3A'}]
-            if database == "HGNC" and item["properties"][0]["value"] == gene_symbol:
-                return item["id"]
-
-            # Example: {'database': 'MIM', 'id': '601058', 'properties': [{'key': 'Type', 'value': 'gene'}]}
-            elif database == "MIM" and item["properties"][0]["value"] == "gene":
-                return item["id"]
+            if item["database"] != "HGNC":
+                continue
 
             # This checks if there is a HGNC ID
-            elif item["database"] == database and gene_symbol is None:
+            if gene_symbol is None:
+                return item["id"]
+
+            # Example: {'database': 'HGNC', 'id': 'HGNC:4764', 'properties': [{'key': 'GeneName', 'value': 'H3-3A'}]
+            if any(
+                property_item["key"] == "GeneName"
+                and property_item["value"] == gene_symbol
+                for property_item in item.get("properties", [])
+            ):
                 return item["id"]
 
     return None
@@ -98,28 +110,45 @@ def fetch_all_data():
             # If protein function or HGNC id is not available then don't consider the data entry
             if (
                 is_protein_function_available(item)
-                and get_database_value("HGNC", item, None) is not None
+                and get_hgnc_id(item) is not None
             ):
                 # 'genes' is a list which can have multiple values (gene symbols)
                 for gene in item["genes"]:
                     current_item = {}
-                    current_item["gene_symbol"] = gene["geneName"]["value"]
+                    gene_symbol = gene["geneName"]["value"]
                     current_item["accession"] = item["primaryAccession"]
                     current_item["protein_function"] = item["comments"][0]["texts"][0][
                         "value"
                     ]
-                    current_item["HGNC"] = get_database_value(
-                        "HGNC", item, current_item["gene_symbol"]
-                    )
-                    current_item["MIM"] = get_database_value(
-                        "MIM", item, current_item["gene_symbol"]
-                    )
+                    current_item["HGNC"] = get_hgnc_id(item, gene_symbol)
                     total_items.append(current_item)
 
     print(
         f"Uniprot data successfully fetched via Uniprot API ({len(total_items)} entries)"
     )
     return total_items
+
+
+def get_current_uniprot_release(db_host, db_port, db_name, db_user, db_password):
+    sql_meta = """ SELECT m.version
+                   FROM meta m
+                   JOIN source s ON s.id = m.source_id
+                   WHERE m.`key` = %s AND s.name = %s
+                   ORDER BY m.date_update DESC
+                   LIMIT 1 """
+
+    db = MySQLdb.connect(
+        host=db_host, port=db_port, user=db_user, passwd=db_password, db=db_name
+    )
+    cursor = db.cursor()
+    cursor.execute(sql_meta, ["import_uniprot", "UniProt"])
+    data = cursor.fetchone()
+    db.close()
+
+    if data is None:
+        return None
+
+    return data[0]
 
 
 # Function to insert Uniprot data to database
@@ -136,8 +165,13 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
         """ SELECT identifier, locus_id FROM locus_identifier WHERE source_id = %s"""
     )
 
-    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, hgnc, gene_symbol, mim, protein_function, source_id)
-                  VALUES(%s, %s, %s, %s, %s, %s, %s) """
+    sql_attrib = """ SELECT a.id
+                     FROM attrib a
+                     JOIN attrib_type at ON at.id = a.type_id
+                     WHERE a.value = %s AND at.code = %s """
+
+    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, protein_function, source_id, data_type_id)
+                  VALUES(%s, %s, %s, %s, %s) """
 
     sql_meta = """ INSERT INTO meta(`key`, date_update, is_public, description, source_id, version)
                     VALUES(%s,%s,%s,%s,%s,%s) """
@@ -162,6 +196,15 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
     if len(data) != 0:
         for row in data:
             source_ids[row[1]] = row[0]
+
+    cursor.execute(sql_attrib, ["uniprot_protein_function", "uniprot_data"])
+    data_type_row = cursor.fetchone()
+    if data_type_row is None:
+        sys.exit(
+            "ERROR: attrib 'uniprot_protein_function' of type 'uniprot_data' is missing"
+        )
+    data_type_id = data_type_row[0]
+
     # Fetch locus identifiers
     identifier_to_locus_id_map = {}
     cursor.execute(sql_identifier, [source_ids["HGNC"]])
@@ -178,11 +221,9 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
                 [
                     item["accession"],
                     identifier_to_locus_id_map[item["HGNC"]],
-                    item["HGNC"],
-                    item["gene_symbol"],
-                    item["MIM"],
                     item["protein_function"],
                     source_ids["UniProt"],
+                    data_type_id,
                 ],
             )
             insert_count += 1
@@ -232,6 +273,17 @@ def main():
         g2p_db_name = g2p_config["name"]
         g2p_user = g2p_config["user"]
         g2p_password = g2p_config["password"]
+
+    latest_uniprot_release = fetch_uniprot_release()
+    current_uniprot_release = get_current_uniprot_release(
+        g2p_db_host, g2p_db_port, g2p_db_name, g2p_user, g2p_password
+    )
+
+    if current_uniprot_release == latest_uniprot_release:
+        print(
+            f"Skipping update: UniProt data is up-to-date ({latest_uniprot_release})."
+        )
+        return
 
     total_items = fetch_all_data()
     insert_uniprot_data(
