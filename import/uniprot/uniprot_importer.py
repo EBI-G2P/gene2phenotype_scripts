@@ -13,8 +13,11 @@ from requests.adapters import HTTPAdapter, Retry
 
 """
 This script imports required gene information from Uniprot via the Uniprot REST API.
+Data retrieved from Uniprot includes:
+ - protein function
+ - subunit information with filtering to keep only relevant information about the quaternary structure (e.g. homodimer, heterodimer, monomer, etc.)
 
-Usage: python uniprot_importer.py [OPTIONS]
+Usage: python uniprot_importer.py --config <config_file>
 
 Options:
         --config    Config file with details to the G2P database (mandatory)
