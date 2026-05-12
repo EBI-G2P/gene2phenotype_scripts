@@ -45,6 +45,7 @@ uniprot_release = None
 
 
 def fetch_uniprot_release():
+    """Fetch the current UniProt release version from the REST API."""
     global uniprot_release
     release_url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession&size=1"
     response = session.get(release_url)
@@ -54,6 +55,7 @@ def fetch_uniprot_release():
 
 
 def get_next_link(headers):
+    """Return the next pagination link from UniProt response headers."""
     if "Link" in headers:
         match = re_next_link.match(headers["Link"])
         if match:
@@ -61,6 +63,7 @@ def get_next_link(headers):
 
 
 def get_batch(batch_url):
+    """Yield paginated UniProt API responses starting from the given URL."""
     global uniprot_release
     while batch_url:
         response = session.get(batch_url)
@@ -72,6 +75,7 @@ def get_batch(batch_url):
 
 
 def get_hgnc_id(dataItem, gene_symbol=None):
+    """Return the HGNC ID for a UniProt entry and optional gene symbol."""
     if "uniProtKBCrossReferences" in dataItem and len(
         dataItem["uniProtKBCrossReferences"]
     ):
@@ -95,6 +99,7 @@ def get_hgnc_id(dataItem, gene_symbol=None):
 
 
 def extract_protein_function_text(dataItem):
+    """Extract the first protein function annotation from a UniProt entry."""
     for comment in dataItem.get("comments", []):
         if comment.get("commentType") != "FUNCTION":
             continue
@@ -106,6 +111,7 @@ def extract_protein_function_text(dataItem):
 
 
 def extract_subunit_text(dataItem):
+    """Extract all subunit annotation text from a UniProt entry."""
     subunit_texts = []
     for comment in dataItem.get("comments", []):
         if comment.get("commentType") != "SUBUNIT":
@@ -118,6 +124,7 @@ def extract_subunit_text(dataItem):
 
 
 def filter_subunit_text(subunit_text):
+    """Keep only subunit sentences that describe oligomeric state."""
     keywords = [
         "homodimer",
         "heterodimer",
@@ -177,8 +184,8 @@ def filter_subunit_text(subunit_text):
     return " | ".join(accepted_parts)
 
 
-# Function to fetch Uniprot data
 def fetch_all_data():
+    """Fetch UniProt annotations and convert them into importable rows."""
     total_items = []
     for batch in get_batch(url):
         current_batch_json = batch.json()
@@ -226,6 +233,7 @@ def fetch_all_data():
 
 
 def get_current_uniprot_release(db_host, db_port, db_name, db_user, db_password):
+    """Return the latest imported UniProt release version from the database."""
     sql_meta = """ SELECT m.version
                    FROM meta m
                    JOIN source s ON s.id = m.source_id
@@ -249,6 +257,7 @@ def get_current_uniprot_release(db_host, db_port, db_name, db_user, db_password)
 
 # Function to insert Uniprot data to database
 def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_items):
+    """Replace UniProt annotations in the database with the fetched rows."""
     sql_truncate = """ TRUNCATE TABLE uniprot_annotation """
 
     sql_count = """ SELECT COUNT(*) from uniprot_annotation """
@@ -354,7 +363,9 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
 
 
 def main():
-    parser = argparse.ArgumentParser(description="")
+    parser = argparse.ArgumentParser(
+        description="Import UniProt protein function and subunit annotations into G2P."
+    )
     parser.add_argument(
         "--config", required=True, help="Config file with details to the G2P database"
     )
