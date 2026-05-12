@@ -266,7 +266,7 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
                      JOIN attrib_type at ON at.id = a.type_id
                      WHERE a.value = %s AND at.code = %s """
 
-    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, protein_function, source_id, data_type_id)
+    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, annotation, source_id, data_type_id)
                   VALUES(%s, %s, %s, %s, %s) """
 
     sql_meta = """ INSERT INTO meta(`key`, date_update, is_public, description, source_id, version)
@@ -310,6 +310,7 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
             identifier_to_locus_id_map[row[0]] = row[1]
     # Insert Uniprot data
     insert_count = 0
+    insert_count_by_attrib = {}
     for item in total_items:
         if item["HGNC"] in identifier_to_locus_id_map:
             cursor.execute(
@@ -323,6 +324,9 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
                 ],
             )
             insert_count += 1
+            insert_count_by_attrib[item["data_type"]] = (
+                insert_count_by_attrib.get(item["data_type"], 0) + 1
+            )
     # Insert import info into meta table
     cursor.execute(
         sql_meta,
@@ -341,6 +345,9 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
     print(f"Previous total number of uniprot entries: {previous_number_rows[0]}")
     print(f"Total Uniprot entries fetched: {len(total_items)}")
     print(f"Total Uniprot entries inserted: {insert_count}")
+    print("Total Uniprot entries inserted by attrib:")
+    for data_type in sorted(insert_count_by_attrib):
+        print(f"  {data_type}: {insert_count_by_attrib[data_type]}")
     print(
         "Note: Only Uniprot data entries with existing Gene information in the database will be inserted."
     )
