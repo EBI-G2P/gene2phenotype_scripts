@@ -13,8 +13,11 @@ from requests.adapters import HTTPAdapter, Retry
 
 """
 This script imports required gene information from Uniprot via the Uniprot REST API.
+Data retrieved from Uniprot includes:
+ - protein function
+ - subunit information with filtering to keep only relevant information about the quaternary structure (e.g. homodimer, heterodimer, monomer, etc.)
 
-Usage: python uniprot_importer.py [OPTIONS]
+Usage: python uniprot_importer.py --config <config_file>
 
 Options:
         --config    Config file with details to the G2P database (mandatory)
@@ -29,7 +32,7 @@ Options:
 
 
 # Uniprot data fetch URL
-url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,xref_hgnc,gene_primary&size=500"
+url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,cc_subunit,xref_hgnc,gene_primary&size=500"
 
 # Configuration to fetch Uniprot data
 re_next_link = re.compile(r'<(.+)>; rel="next"')
@@ -42,6 +45,7 @@ uniprot_release = None
 
 
 def fetch_uniprot_release():
+    """Fetch the current UniProt release version from the REST API."""
     global uniprot_release
     release_url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession&size=1"
     response = session.get(release_url)
@@ -51,6 +55,7 @@ def fetch_uniprot_release():
 
 
 def get_next_link(headers):
+    """Return the next pagination link from UniProt response headers."""
     if "Link" in headers:
         match = re_next_link.match(headers["Link"])
         if match:
@@ -58,6 +63,7 @@ def get_next_link(headers):
 
 
 def get_batch(batch_url):
+    """Yield paginated UniProt API responses starting from the given URL."""
     global uniprot_release
     while batch_url:
         response = session.get(batch_url)
@@ -69,6 +75,7 @@ def get_batch(batch_url):
 
 
 def get_hgnc_id(dataItem, gene_symbol=None):
+    """Return the HGNC ID for a UniProt entry and optional gene symbol."""
     if "uniProtKBCrossReferences" in dataItem and len(
         dataItem["uniProtKBCrossReferences"]
     ):
@@ -91,37 +98,133 @@ def get_hgnc_id(dataItem, gene_symbol=None):
     return None
 
 
-def is_protein_function_available(dataItem):
-    return (
-        "comments" in dataItem
-        and len(dataItem["comments"]) != 0
-        and "texts" in dataItem["comments"][0]
-        and len(dataItem["comments"][0]["texts"]) != 0
-        and "value" in dataItem["comments"][0]["texts"][0]
-    )
+def extract_protein_function_text(dataItem):
+    """Extract the first protein function annotation from a UniProt entry."""
+    for comment in dataItem.get("comments", []):
+        if comment.get("commentType") != "FUNCTION":
+            continue
+        for text_item in comment.get("texts", []):
+            value = text_item.get("value")
+            if value:
+                return value.replace("\n", " ").strip()
+    return None
 
 
-# Function to fetch Uniprot data
+def extract_subunit_text(dataItem):
+    """Extract all subunit annotation text from a UniProt entry."""
+    subunit_texts = []
+    for comment in dataItem.get("comments", []):
+        if comment.get("commentType") != "SUBUNIT":
+            continue
+        for text_item in comment.get("texts", []):
+            value = text_item.get("value")
+            if value:
+                subunit_texts.append(value.replace("\n", " ").strip())
+    return " | ".join(subunit_texts)
+
+
+def filter_subunit_text(subunit_text):
+    """Keep only subunit sentences that describe oligomeric state."""
+    keywords = [
+        "homodimer",
+        "heterodimer",
+        "monomer",
+        "dimer",
+        "pentamer",
+        "pentameric",
+        "hexamer",
+        "hexameric",
+        "octamer",
+        "dodecamer",
+        "hexadecamer",
+        "homomer",
+        "homodimer",
+        "homotrimer",
+        "homotetramer",
+        "homopentamer",
+        "homohexamer",
+        "homoheptamer",
+        "homodecamer",
+        "homododecamer",
+        "homomultimer",
+        "heterodimer",
+        "heterotrimer",
+        "heterotetramer",
+        "heteropentamer",
+        "heterohexamer",
+        "heteromultimer",
+        "heteromultimeric",
+        "homooligomer",
+        "homooligomerizes",
+        "oligomer",
+        "oligomerize",
+        "self-associates",
+    ]
+
+    if not subunit_text:
+        return ""
+
+    accepted_parts = []
+    for part in subunit_text.split(" | "):
+        part = part.strip()
+        if not part:
+            continue
+
+        accepted_sentences = []
+        for sentence in re.split(r"(?<=\.)\s+", part):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            if any(s in sentence for s in keywords):
+                accepted_sentences.append(sentence)
+
+        filtered_part = " ".join(accepted_sentences).strip()
+        if filtered_part:
+            accepted_parts.append(filtered_part)
+    return " | ".join(accepted_parts)
+
+
 def fetch_all_data():
+    """Fetch UniProt annotations and convert them into importable rows."""
     total_items = []
     for batch in get_batch(url):
         current_batch_json = batch.json()
         for item in current_batch_json["results"]:
-            # If protein function or HGNC id is not available then don't consider the data entry
-            if (
-                is_protein_function_available(item)
-                and get_hgnc_id(item) is not None
-            ):
-                # 'genes' is a list which can have multiple values (gene symbols)
-                for gene in item["genes"]:
-                    current_item = {}
-                    gene_symbol = gene["geneName"]["value"]
-                    current_item["accession"] = item["primaryAccession"]
-                    current_item["protein_function"] = item["comments"][0]["texts"][0][
-                        "value"
-                    ]
-                    current_item["HGNC"] = get_hgnc_id(item, gene_symbol)
-                    total_items.append(current_item)
+            # If HGNC id is not available then don't consider the data entry.
+            if get_hgnc_id(item) is None:
+                continue
+
+            accession = item["primaryAccession"]
+            protein_function_text = extract_protein_function_text(item)
+            filtered_subunit_text = filter_subunit_text(extract_subunit_text(item))
+
+            if not protein_function_text and not filtered_subunit_text:
+                continue
+
+            # 'genes' is a list which can have multiple values (gene symbols).
+            for gene in item["genes"]:
+                gene_symbol = gene["geneName"]["value"]
+                hgnc_id = get_hgnc_id(item, gene_symbol)
+
+                if protein_function_text:
+                    total_items.append(
+                        {
+                            "accession": accession,
+                            "HGNC": hgnc_id,
+                            "annotation": protein_function_text,
+                            "data_type": "uniprot_protein_function",
+                        }
+                    )
+
+                if filtered_subunit_text:
+                    total_items.append(
+                        {
+                            "accession": accession,
+                            "HGNC": hgnc_id,
+                            "annotation": filtered_subunit_text,
+                            "data_type": "uniprot_subunit",
+                        }
+                    )
 
     print(
         f"Uniprot data successfully fetched via Uniprot API ({len(total_items)} entries)"
@@ -130,6 +233,7 @@ def fetch_all_data():
 
 
 def get_current_uniprot_release(db_host, db_port, db_name, db_user, db_password):
+    """Return the latest imported UniProt release version from the database."""
     sql_meta = """ SELECT m.version
                    FROM meta m
                    JOIN source s ON s.id = m.source_id
@@ -153,6 +257,7 @@ def get_current_uniprot_release(db_host, db_port, db_name, db_user, db_password)
 
 # Function to insert Uniprot data to database
 def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_items):
+    """Replace UniProt annotations in the database with the fetched rows."""
     sql_truncate = """ TRUNCATE TABLE uniprot_annotation """
 
     sql_count = """ SELECT COUNT(*) from uniprot_annotation """
@@ -170,7 +275,7 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
                      JOIN attrib_type at ON at.id = a.type_id
                      WHERE a.value = %s AND at.code = %s """
 
-    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, protein_function, source_id, data_type_id)
+    insert_sql = """ INSERT INTO uniprot_annotation(uniprot_accession, gene_id, annotation, source_id, data_type_id)
                   VALUES(%s, %s, %s, %s, %s) """
 
     sql_meta = """ INSERT INTO meta(`key`, date_update, is_public, description, source_id, version)
@@ -197,13 +302,13 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
         for row in data:
             source_ids[row[1]] = row[0]
 
-    cursor.execute(sql_attrib, ["uniprot_protein_function", "uniprot_data"])
-    data_type_row = cursor.fetchone()
-    if data_type_row is None:
-        sys.exit(
-            "ERROR: attrib 'uniprot_protein_function' of type 'uniprot_data' is missing"
-        )
-    data_type_id = data_type_row[0]
+    data_type_ids = {}
+    for data_type in ["uniprot_protein_function", "uniprot_subunit"]:
+        cursor.execute(sql_attrib, [data_type, "uniprot_data"])
+        data_type_row = cursor.fetchone()
+        if data_type_row is None:
+            sys.exit(f"ERROR: attrib '{data_type}' of type 'uniprot_data' is missing")
+        data_type_ids[data_type] = data_type_row[0]
 
     # Fetch locus identifiers
     identifier_to_locus_id_map = {}
@@ -214,6 +319,7 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
             identifier_to_locus_id_map[row[0]] = row[1]
     # Insert Uniprot data
     insert_count = 0
+    insert_count_by_attrib = {}
     for item in total_items:
         if item["HGNC"] in identifier_to_locus_id_map:
             cursor.execute(
@@ -221,12 +327,15 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
                 [
                     item["accession"],
                     identifier_to_locus_id_map[item["HGNC"]],
-                    item["protein_function"],
+                    item["annotation"],
                     source_ids["UniProt"],
-                    data_type_id,
+                    data_type_ids[item["data_type"]],
                 ],
             )
             insert_count += 1
+            insert_count_by_attrib[item["data_type"]] = (
+                insert_count_by_attrib.get(item["data_type"], 0) + 1
+            )
     # Insert import info into meta table
     cursor.execute(
         sql_meta,
@@ -245,13 +354,18 @@ def insert_uniprot_data(db_host, db_port, db_name, db_user, db_password, total_i
     print(f"Previous total number of uniprot entries: {previous_number_rows[0]}")
     print(f"Total Uniprot entries fetched: {len(total_items)}")
     print(f"Total Uniprot entries inserted: {insert_count}")
+    print("Total Uniprot entries inserted by attrib:")
+    for data_type in sorted(insert_count_by_attrib):
+        print(f"  {data_type}: {insert_count_by_attrib[data_type]}")
     print(
         "Note: Only Uniprot data entries with existing Gene information in the database will be inserted."
     )
 
 
 def main():
-    parser = argparse.ArgumentParser(description="")
+    parser = argparse.ArgumentParser(
+        description="Import UniProt protein function and subunit annotations into G2P."
+    )
     parser.add_argument(
         "--config", required=True, help="Config file with details to the G2P database"
     )
