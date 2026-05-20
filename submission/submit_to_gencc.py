@@ -79,10 +79,12 @@ def write_to_the_GenCC_file(
         outfile (Path): The output file with records to be submitted
     """
     with open(outfile, mode="w") as rw:
+        # Write the header of the file. GenCC expects a specific format:
+        # the header is expected to be at row 6; the first record is expected to be at row 13
         rw.write(
-            "sgc_id\taction\tlocal_key\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name"
+            "\n\n\n\n\nsgc_id\taction\tlocal_key\thgnc_id\thgnc_symbol\tdisease_id\tdisease_name\tmoi_id\tmoi_name"
             "\tsubmitter_id\tsubmitter_name\tclassification_id\tclassification_name\tdate"
-            "\tpublic_report_url\tnotes\tpmids\tassertion_criteria_url\n"
+            "\tpublic_report_url\tnotes\tpmids\tassertion_criteria_url\n\n\n\n\n\n\n"
         )
         issues_with_record = {}
         assertion_criteria_url = (
@@ -108,7 +110,7 @@ def write_to_the_GenCC_file(
                 continue
 
             g2p_id = record["g2p id"]
-            hgnc_id = record["hgnc id"]
+            hgnc_id = "HGNC:"+record["hgnc id"]
             hgnc_symbol = record["gene symbol"]
             disease_id = record["disease mim"] or record["disease MONDO"]
 
@@ -116,6 +118,9 @@ def write_to_the_GenCC_file(
             if disease_id is None or disease_id == "":
                 issues_with_record[g2p_id] = "Missing disease ID"
                 continue
+
+            if disease_id.isdigit():
+                disease_id = "OMIM:"+disease_id
 
             disease_name = record["disease name"]
 
@@ -135,7 +140,7 @@ def write_to_the_GenCC_file(
             record_url = "https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id
             pmids = record["publications"]
 
-            line_to_output = f"{submission_id or ''}\t{action}\t\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t\t{pmids}\t{assertion_criteria_url}\n"
+            line_to_output = f"{submission_id or ''}\t{action}\t{g2p_id}\t{hgnc_id}\t{hgnc_symbol}\t{disease_id}\t{disease_name}\t{moi_id}\t{moi_name}\t{submitter_id}\t{submitter_name}\t{classification_id}\t{classification_name}\t{date}\t{record_url}\t\t{pmids}\t{assertion_criteria_url}\n"
             rw.write(line_to_output)
 
     if issues_with_record:
