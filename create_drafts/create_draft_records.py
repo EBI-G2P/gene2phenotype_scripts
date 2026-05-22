@@ -240,7 +240,7 @@ def prepare_draft_records(
 
                     final_draft["molecular_mechanism"] = {
                         "name": "",
-                        "support": "inferred",
+                        "support": "",
                     }
                     final_draft["mechanism_synopsis"] = []
                     # Mechanism evidence

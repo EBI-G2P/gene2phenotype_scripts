@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+from pathlib import Path
 import sys
 import argparse
 import configparser
@@ -110,7 +111,7 @@ def process_g2p_records(g2p_records) -> list:
     return g2p_data_by_gene
 
 
-def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, clingen_panel: str) -> None:
+def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, clingen_panel: str, list_genes_keep: list) -> None:
     """
     Read the ClinGen json file
     """
@@ -118,6 +119,7 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, cl
     new_records = 0
     records_to_check = 0
     drafts_to_create = []
+    genes_found = []
 
     with open(file) as fh:
         data = json.load(fh)
@@ -143,6 +145,13 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, cl
                 record["evidence"] = new_mechanism_evidence
 
             gene = record["gene_symbol"]
+
+            # Skip genes that are not in the list of genes to keep (if provided)
+            if list_genes_keep and gene not in list_genes_keep:
+                continue
+
+            genes_found.append(gene)
+
             # The gene is already associated with g2p records
             if gene in g2p_data_by_gene:
                 for g2p_record in g2p_data_by_gene[gene]:
@@ -169,6 +178,13 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, cl
     print(f"\nTotal records: {total_records}")
     print(f"New records: {new_records}")
     print(f"Potential new records: {records_to_check}")
+
+    # Check genes in the list of genes to keep that were not found in the ClinGen data
+    # Some of these could be in G2P, if so we don't want to include them 
+    if list_genes_keep:
+        genes_not_found = set(list_genes_keep) - set(genes_found)
+        if genes_not_found:
+            print(f"\nThe following genes were not found in the ClinGen data but are in the list of genes to keep:\n{', '.join(genes_not_found)}")
 
     with open(output_file, "wt") as wr:
         json.dump(drafts_to_create, wr, indent=2)
@@ -219,7 +235,6 @@ def process_panelapp_data(
     output_file: str,
     clingen_file: str,
     clingen_panel: str,
-    katherine_list: dict,
 ) -> None:
     total_records = 0
     new_records = 0
@@ -314,8 +329,6 @@ def process_panelapp_data(
                         clingen_info.append(clingen_record)
             if clingen_info:
                 draft_record["clingen_data"] = clingen_info
-            if katherine_list and gene_symbol in katherine_list:
-                draft_record["katherine_schon_data"] = katherine_list[gene_symbol]
 
             # Check if gene is curated in G2P
             draft_record["g2p_data"] = []
@@ -346,39 +359,15 @@ def process_panelapp_data(
             json.dump(drafts_to_create, wr, indent=2)
 
 
-def read_extra_file(katherine_file: str) -> dict:
+def read_genes_to_include(genes_to_include: Path) -> list:
     """
-    Read Katherine Schon MT gene list
+    Read file with list of genes to include in the pre-draft records
     """
-    final_list = {}
+    if not os.path.isfile(genes_to_include):
+        sys.exit(f"Invalid file with genes to include '{genes_to_include}'")
 
-    if not katherine_file:
-        return
-
-    if not os.path.isfile(katherine_file):
-        sys.exit(f"Invalid Katherine Schon MT gene list file '{katherine_file}'")
-
-    with open(katherine_file, "r", encoding="utf-8") as fh:
-        for row in fh:
-            data_row = row.split("\t")
-            if data_row[0] not in final_list:
-                final_list[data_row[0]] = [
-                    {
-                        "pmids": data_row[1].strip().replace('"', ""),
-                        "comment": data_row[2].strip().replace('"', ""),
-                        "gene_rating": data_row[3].strip().replace('"', ""),
-                    }
-                ]
-            else:
-                final_list[data_row[0]].append(
-                    {
-                        "pmids": data_row[1].strip().replace('"', ""),
-                        "comment": data_row[2].strip().replace('"', ""),
-                        "gene_rating": data_row[3].strip().replace('"', ""),
-                    }
-                )
-
-    return final_list
+    with open(genes_to_include, "r", encoding="utf-8") as fh:
+        return [line.strip() for line in fh if line.strip()]
 
 
 def main():
@@ -396,9 +385,9 @@ def main():
         "--clingen_panel", required=True, help="ClinGen panel to append to PanelApp records"
     )
     parser.add_argument(
-        "--katherine_file",
+        "--genes_to_include",
         required=False,
-        help="Katherine Schon MT gene list (supported format: json)",
+        help="File containing a list of genes to include in the pre-draft records",
     )
     parser.add_argument(
         "--output_file",
@@ -414,7 +403,7 @@ def main():
     source = args.source
     clingen_file = args.clingen_file
     clingen_panel = args.clingen_panel
-    katherine_file = args.katherine_file
+    genes_to_include = args.genes_to_include
     output_file = args.output_file
 
     if not output_file:
@@ -442,15 +431,16 @@ def main():
     g2p_data_by_gene = process_g2p_records(g2p_records)
     logout(api_url, cookies)
 
+    list_genes_keep = []
+    if genes_to_include:
+        list_genes_keep = read_genes_to_include(genes_to_include)
+
     if source.lower() == "clingen":
-        process_clingen_data(input_file, g2p_data_by_gene, output_file, clingen_panel)
+        process_clingen_data(input_file, g2p_data_by_gene, output_file, clingen_panel, list_genes_keep)
 
     if source.lower() == "panelapp":
-        katherine_list = {}
-        if katherine_file:
-            katherine_list = read_extra_file(katherine_file)
         process_panelapp_data(
-            input_file, g2p_data_by_gene, output_file, clingen_file, clingen_panel, katherine_list
+            input_file, g2p_data_by_gene, output_file, clingen_file, clingen_panel
         )
 
 
