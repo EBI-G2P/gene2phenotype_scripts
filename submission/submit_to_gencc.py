@@ -62,6 +62,7 @@ def fetch_g2p_records(data: dict[str, Any]) -> list:
 
 def write_to_the_GenCC_file(
     records_data: list,
+    exceptions_dict: dict,
     outfile: Path,
     output_file_issues: Path,
 ) -> Path:
@@ -72,6 +73,7 @@ def write_to_the_GenCC_file(
 
     Args:
         records_data (dict[str, Any]): Record of unsubmitted ids
+        exceptions_dict (dict): Dictionary with the exceptions to be considered when handling the submission
         outfile (Path): Output file to write the submission into
         output_file_issues (Path): File to write the records with issues into
 
@@ -112,7 +114,23 @@ def write_to_the_GenCC_file(
             g2p_id = record["g2p id"]
             hgnc_id = "HGNC:"+record["hgnc id"]
             hgnc_symbol = record["gene symbol"]
-            disease_id = record["disease mim"] or record["disease MONDO"]
+
+            if "disease id" in record:
+                disease_id = record["disease id"]
+            else:
+                disease_id = record["disease mim"] or record["disease MONDO"]
+
+            # Check exceptions for the record
+            # This is going to be used by new submissions (not by existing submissions)
+            if exceptions_dict and g2p_id in exceptions_dict:
+                rule = exceptions_dict[g2p_id]
+                if rule == "not submit":
+                    issues_with_record[g2p_id] = "Excluded by exception rule"
+                    continue
+                elif rule.startswith("MONDO"):
+                    disease_id = rule
+                elif rule.startswith("OMIM"):
+                    disease_id = rule
 
             # We cannot submit records without disease ID
             if disease_id is None or disease_id == "":
@@ -220,6 +238,7 @@ def prepare_output_dir(path: str) -> Path:
 
 def handle_existing_submission(
     latest_g2p_data: list,
+    exceptions_dict: dict,
     output_file: Path,
     output_file_updated: Path,
     output_file_issues: Path,
@@ -233,6 +252,7 @@ def handle_existing_submission(
 
     Args:
         latest_g2p_data (list): Data from the G2P all records file
+        exceptions_dict (dict): Dictionary with the exceptions to be considered when handling the submission
         output_file (Path): Output text file where the submission will be written into
         output_file_updated (Path): Output text file where the updated records will be written into
         output_file_issues (Path): Output text file where the records with issues will be written into
@@ -255,6 +275,20 @@ def handle_existing_submission(
         g2p_id = g2p_record["g2p id"]
         g2p_mondo_id = g2p_record["disease MONDO"].strip()
         g2p_omim_id = g2p_record["disease mim"].strip()
+
+        # Check exceptions for the record
+        if g2p_id in exceptions_dict:
+            rule = exceptions_dict[g2p_id]
+            if rule == "not submit":
+                records_with_issues.append(f"{g2p_id}\texcluded by exception rule")
+                continue
+            elif rule.startswith("MONDO"):
+                g2p_mondo_id = rule
+                # Define the disease id to be submitted
+                g2p_record["disease id"] = g2p_mondo_id
+            elif rule.startswith("OMIM"):
+                g2p_omim_id = rule
+                g2p_record["disease id"] = g2p_omim_id
 
         # Keep track of unique records: gene + genotype + disease id (Mondo id) + mechanism
         key_by_mondo = f"{g2p_record['gene symbol']}---{g2p_mondo_id}---{g2p_record['allelic requirement']}---{g2p_record['molecular mechanism']}"
@@ -304,16 +338,16 @@ def handle_existing_submission(
 
     # Write the new G2P records to submit to the GenCC file
     outfile = write_to_the_GenCC_file(
-        records_to_submit, output_file, output_file_issues
+        records_to_submit, {}, output_file, output_file_issues
     )
 
     # Write the updated records to a separate file
     outfile_updated_records = write_to_the_GenCC_file(
-        records_to_update, output_file_updated, output_file_issues
+        records_to_update, {}, output_file_updated, output_file_issues
     )
 
     outfile_deleted_records = write_to_the_GenCC_file(
-        records_to_delete, output_file_deleted, output_file_issues
+        records_to_delete, {}, output_file_deleted, output_file_issues
     )
 
     with open(output_file_issues, mode="a") as textfile:
@@ -366,6 +400,28 @@ def get_gencc_g2p_data(gencc_file):
     return gencc_g2p_data
 
 
+def read_exceptions_file(exceptions_file: Path) -> dict:
+    """
+    Read the exceptions file and return a dictionary with the G2P ID as key and the rule as value.
+
+    Args:
+        exceptions_file (Path): File with the list of exceptions to be considered when handling the submission  
+    """
+    exceptions_dict = {}
+
+    with open(exceptions_file, mode="r") as textfile:
+        for line in textfile:
+            parts = line.strip().split("\t")
+            # Skip header line if it exists
+            if parts[0].lower() == "g2p_id":
+                continue
+
+            g2p_id, rule = parts[0], parts[1]
+            exceptions_dict[g2p_id] = rule
+
+    return exceptions_dict
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -386,6 +442,12 @@ def main():
         required=True,
         type=Path,
         help="Latest GenCC data file",
+    )
+    ap.add_argument(
+        "--exceptions_file",
+        required=False,
+        type=Path,
+        help="File with the list of exceptions to be considered when handling the submission",
     )
     args = ap.parse_args()
 
@@ -415,12 +477,18 @@ def main():
     g2p_data = fetch_g2p_records(db_config)
     print("Getting G2P records from the API... done")
 
+    exceptions_dict = {}
+    if args.exceptions_file and os.path.isfile(args.exceptions_file):
+        print(f"\nGetting exceptions from file {args.exceptions_file}...")
+        exceptions_dict = read_exceptions_file(args.exceptions_file)
+        print(f"Getting exceptions from file {args.exceptions_file}... done")
+
     if args.new_submission:
         print("\nHandling new submission...")
         # A new submission means that all records are going to be submitted
         # for the first time
         outfile = write_to_the_GenCC_file(
-            g2p_data, output_file, output_file_issues
+            g2p_data, exceptions_dict, output_file, output_file_issues
         )
         print("Handling new submission... done")
     else:
@@ -430,6 +498,7 @@ def main():
 
         outfile, outfile_updated_records, outfile_deleted_records = handle_existing_submission(
             g2p_data,
+            exceptions_dict,
             output_file,
             output_file_updated,
             output_file_issues,
