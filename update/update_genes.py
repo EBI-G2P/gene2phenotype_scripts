@@ -15,7 +15,7 @@ import MySQLdb
 """
     Script to update genes in G2P database based on a new Ensembl GTF file.
     By default, it updates/adds genes based on the Ensembl stable IDs.
-    To only update the gene symbols based on HGNC data, use the --only_update_gene_symbols option.
+    To only update the gene symbols based on HGNC data, use the --only_update_gene_symbol option.
 
     Options:
             --config:       Config file with details to the G2P database (mandatory)
@@ -28,7 +28,7 @@ import MySQLdb
                                 name = <>
             --working_dir:  Working directory to store report files (mandatory)
             --version:      Ensembl version only required if going to run the genes update (optional)
-            --only_update_gene_symbols:  Only update gene symbols based on HGNC data (optional)
+            --only_update_gene_symbol:  Only update gene symbols based on HGNC data (optional)
 """
 
 

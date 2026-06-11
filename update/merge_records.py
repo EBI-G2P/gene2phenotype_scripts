@@ -28,7 +28,7 @@ import requests
 
             --api-username: Username to connect to the G2P API (mandatory)
             --api-password: Password to connect to the G2P API (mandatory)
-            --dryrun: Test script without running the updates (default: 0)
+            --dryrun: Test script without running the updates (not used by default)
 """
 
 
