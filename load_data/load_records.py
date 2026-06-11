@@ -13,10 +13,16 @@ from pandas import read_excel, read_csv
 """
     Script      : load_records.py
 
-    Description : 
+    Description :
+                Script to validate and import G2P records from a CSV or XLSX file.
+                It checks the input rows against G2P genes, diseases, panels,
+                mechanisms, variant consequences and publication metadata before
+                loading valid records through the API with the following steps:
+                1. Create a draft record for each valid record to be imported
+                2. Publish the record to make it available in G2P
+                Invalid rows are written to the report file with the reason they could not be imported.
 
     Options     :
-
                 --config : Config file containing the G2P db and API connection details (mandatory)
                         File format is the following:
                             [g2p_database]
@@ -32,6 +38,7 @@ from pandas import read_excel, read_csv
                 --file : File with all records to be imported. Supported formats: csv, xlsx (mandatory)                
                 --api_username: Username to connect to the G2P API (mandatory)
                 --api_password: Password to connect to the G2P API (mandatory)
+                --report: Report file to save the records that cannot be imported with the reason (default: report.txt)
                 --dryrun: Test script without running the import (default: 0)
 """
 

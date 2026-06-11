@@ -18,11 +18,11 @@ Script to extract data from the ClinGen evidence summaries using the Google Gemi
 Options:
         --config:        Config file containing the Gemini model details (mandatory)
                             File format is the following: 
-                            [gemini_model]
+                            [project_config]
                             key_file = <> # Google Vertex AI key (format: json)
                             model = <>    # Gemini model (default: gemini-2.5-flash)
                             location = <> # Location for the Gemini model (default: europe-west2)
-                            project_name = <>
+                            project = <>
         --input_file:    Input JSON file with ClinGen evidence summaries (mandatory)
         -l \ --limit:         Process N entries and exit (default: all)
         --rpm:           Max requests per minute (default: 10)
@@ -192,7 +192,12 @@ Evidence summary: {record["evidence_summary"]}\
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--input_file", type=Path, help="Input JSON file")
+    parser.add_argument(
+        "--input_file",
+        required=True,
+        type=Path,
+        help="Input JSON file with ClinGen evidence summaries"
+    )
     parser.add_argument(
         "--config",
         type=Path,
