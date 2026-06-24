@@ -32,7 +32,7 @@ Options:
 
 
 # Uniprot data fetch URL
-url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,cc_subunit,xref_hgnc,gene_primary&size=500"
+url = "https://rest.uniprot.org/uniprotkb/search?query=reviewed:true+AND+organism_id:9606&fields=accession,cc_function,cc_subunit,xref_hgnc,gene_primary&size=100"
 
 # Configuration to fetch Uniprot data
 re_next_link = re.compile(r'<(.+)>; rel="next"')
