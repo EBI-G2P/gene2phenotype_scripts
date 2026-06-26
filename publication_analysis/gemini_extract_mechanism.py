@@ -125,6 +125,7 @@ def run_process(args):
         http_options=HttpOptions(api_version="v1")
     )
 
+    records_to_analyse = None
     if args.file_records:
         with args.file_records.open("rt") as fh:
             records_to_analyse = set(line.strip() for line in fh if line.strip())
