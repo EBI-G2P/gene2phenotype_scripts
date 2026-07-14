@@ -300,7 +300,7 @@ def generate_report(
                     if log["data_type"] == "variant_consequence":
                         report_row += f"'{log['variant_consequence']}'\n"
                     if log["data_type"] == "variant_type":
-                        report_row += f"'{log['variant_type']}' for PMID {log['publication_pmid']}\n"
+                        report_row += f"'{log['variant_type']}'\n"
                     if log["data_type"] == "record_comment":
                         is_public = (
                             "public comment" if log["is_public"] else "private comment"
