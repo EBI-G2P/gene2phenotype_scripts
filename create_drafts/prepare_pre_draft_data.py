@@ -131,16 +131,17 @@ def process_clingen_data(file: str, g2p_data_by_gene: list, output_file: str, cl
 
             # Format the mechanism evidence to the expected format
             new_mechanism_evidence = []
-            for mechanism_evidence in record["evidence"]:
-                if isinstance(mechanism_evidence, dict):
-                    mechanism_evidence_type = mechanism_evidence.get("type", "") or mechanism_evidence.get("evidence_type", "")
-                    if "description" in mechanism_evidence:
-                        new_string = f"{mechanism_evidence_type}: {mechanism_evidence['description']}"
-                    elif "evidence" in mechanism_evidence:
-                        new_string = f"{mechanism_evidence_type}: {mechanism_evidence['evidence']}"
-                    else:
-                        new_string = f"{mechanism_evidence_type}"
-                    new_mechanism_evidence.append(new_string)
+            if "evidence" in record:
+                for mechanism_evidence in record["evidence"]:
+                    if isinstance(mechanism_evidence, dict):
+                        mechanism_evidence_type = mechanism_evidence.get("type", "") or mechanism_evidence.get("evidence_type", "")
+                        if "description" in mechanism_evidence:
+                            new_string = f"{mechanism_evidence_type}: {mechanism_evidence['description']}"
+                        elif "evidence" in mechanism_evidence:
+                            new_string = f"{mechanism_evidence_type}: {mechanism_evidence['evidence']}"
+                        else:
+                            new_string = f"{mechanism_evidence_type}"
+                        new_mechanism_evidence.append(new_string)
             if new_mechanism_evidence:
                 record["evidence"] = new_mechanism_evidence
 
@@ -387,7 +388,7 @@ def main():
     parser.add_argument(
         "--genes_to_include",
         required=False,
-        help="File containing a list of genes to include in the pre-draft records",
+        help="File containing a list of genes to include in the pre-draft records. Supported format: txt (one gene symbol per line)",
     )
     parser.add_argument(
         "--output_file",
