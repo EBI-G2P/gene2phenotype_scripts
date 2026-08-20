@@ -4,10 +4,9 @@ import sys
 import argparse
 import MySQLdb
 import re
-import json
 import requests
 import configparser
-from pandas import read_excel, read_csv
+from pandas import read_excel, read_csv, isna
 
 
 """
@@ -15,12 +14,14 @@ from pandas import read_excel, read_csv
 
     Description :
                 Script to validate and import G2P records from a CSV or XLSX file.
-                It checks the input rows against G2P genes, diseases, panels,
-                mechanisms, variant consequences and publication metadata before
-                loading valid records through the API with the following steps:
+                It reads the input file, preloads reference data from the G2P
+                MySQL database, validates publications through the internal G2P
+                API and phenotypes through the JAX HPO API, and then loads valid
+                records through the internal G2P API with the following steps:
                 1. Create a draft record for each valid record to be imported
                 2. Publish the record to make it available in G2P
-                Invalid rows are written to the report file with the reason they could not be imported.
+                Invalid rows are written to the report file with the reason they
+                could not be imported.
 
     Options     :
                 --config : Config file containing the G2P db and API connection details (mandatory)
@@ -40,10 +41,57 @@ from pandas import read_excel, read_csv
                 --api_password: Password to connect to the G2P API (mandatory)
                 --report: Report file to save the records that cannot be imported with the reason (default: report.txt)
                 --dryrun: Test script without running the import (default: 0)
+
+    Input file  :
+                Supported formats: csv, xlsx
+
+                Mandatory columns:
+                    - gene symbol
+                    - disease name
+                    - allelic requirement
+                    - molecular mechanism
+                    - confidence
+                    - publication
+                    - panel
+                    - inferred variant consequence
+                    - evidence based variant consequence
+
+                Optional columns:
+                    - publication molecular mechanism evidence
+                    - molecular mechanism categorisation
+                    - publication comment
+                    - publication families
+                    - publication affected individuals
+                    - publication consanguinity
+                    - publication families ancestry
+                    - disease mim
+                    - disease MONDO
+                    - cross cutting modifier
+                    - publication phenotypes
+                    - publication variant descriptions
+                    - publication variant types
+                    - public comment
+                    - private comment
+
+                Notes:
+                    - Multi-value fields are separated by ';'
+                    - Inferred and evidence based variant consequences use G2P
+                      ontology terms and may be provided with '_' in the input
+                      file; they are converted to spaces before validation
+                    - See gene2phenotype_scripts/README.md for the full input
+                      column reference
 """
 
 # Global variables to count the number of records
 n_invalid_records = 0
+
+
+def has_value(value):
+    if isna(value):
+        return False
+    if isinstance(value, str) and value.strip() == "":
+        return False
+    return True
 
 def read_file(file):
     file_data = None
@@ -90,8 +138,9 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # TODO: check if record already exists in G2P
             key = row["gene symbol"]+"-"+row["disease name"]+"-"+row["allelic requirement"]+"-"+row["molecular mechanism"]
-            if key in g2p_records:
-                message = f"Record already in G2P: {g2p_records[key]['stable_id']}"
+            record_key = key
+            if record_key in g2p_records:
+                message = f"Record already in G2P: {g2p_records[record_key]['stable_id']}"
                 errors.append(message)
                 valid_record = False
 
@@ -129,7 +178,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                 errors.append(message)
                 valid_record = False
             else:
-                if row["publication molecular mechanism evidence"]:
+                if "publication molecular mechanism evidence" in row and has_value(row["publication molecular mechanism evidence"]):
                     support = "evidence"
                 molecular_mechanism = {
                     "name": row["molecular mechanism"],
@@ -138,7 +187,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Validate the mechanism synopsis
             mechanism_synopsis = {}
-            if row["molecular mechanism categorisation"]:
+            if "molecular mechanism categorisation" in row and has_value(row["molecular mechanism categorisation"]):
                 try:
                     g2p_mechanisms["mechanism_synopsis"][None][row["molecular mechanism categorisation"]]
                 except KeyError:
@@ -170,7 +219,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
             # Validate the inferred variant consequences
             # In G2P the consequence values do not include '_'
             variant_consequences = []
-            if str(row["inferred variant consequence"]) != "nan":
+            if has_value(row["inferred variant consequence"]):
                 for var_cons in re.split(r'\;\s*', row["inferred variant consequence"].replace("_", " ")):
                     try:
                         g2p_ontology[var_cons]
@@ -186,7 +235,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Validate the evidence based variant consequences
             # In G2P the consequence values do not include '_'
-            if str(row["evidence based variant consequence"]) != "nan":
+            if has_value(row["evidence based variant consequence"]):
                 for var_cons in re.split(r'\;\s*', row["evidence based variant consequence"].replace("_", " ")):
                     try:
                         g2p_ontology[var_cons]
@@ -202,24 +251,30 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Validate the PMID - there is one publication per row
             publications = []
-            if isinstance(row["publication"], int):
-                publication_info = fetch_pmid(api_url, row["publication"])
+            pmid = None
+            try:
+                pmid_float = float(row["publication"])
+                if not pmid_float.is_integer():
+                    raise ValueError
+                pmid = int(pmid_float)
+            except (TypeError, ValueError):
+                message = f"Invalid PMID {row['publication']}"
+                errors.append(message)
+                valid_record = False
+            else:
+                publication_info = fetch_pmid(api_url, pmid)
                 if not publication_info:
                     message = f"Invalid PMID {row['publication']}"
                     errors.append(message)
                     valid_record = False
                 else:
                     publications.append({
-                        "pmid": row["publication"],
+                        "pmid": pmid,
                         "year": publication_info["results"][0]["year"],
                         "title": publication_info["results"][0]["title"],
                         "source": publication_info["results"][0]["source"],
                         "authors": publication_info["results"][0]["authors"]
                     })
-            else:
-                message = f"Invalid PMID {row['publication']}"
-                errors.append(message)
-                valid_record = False
 
             if valid_record:
                 # Set the publication data to the default values
@@ -231,32 +286,32 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                 publications[0]["ancestries"] = ""
 
                 # Append the publication comment only if the PMID is valid
-                if "publication comment" in row and str(row["publication comment"]) != "nan":
+                if "publication comment" in row and has_value(row["publication comment"]):
                     publications[0]["comment"] = row["publication comment"]
 
                 # Append the publication number of families only if the PMID is valid
-                if "publication families" in row and str(row["publication families"]) != "nan":
+                if "publication families" in row and has_value(row["publication families"]):
                     publications[0]["families"] = row["publication families"]
 
                 # Append the publication number of affected individuals only if the PMID is valid
-                if "publication affected individuals" in row and str(row["publication affected individuals"]) != "nan":
+                if "publication affected individuals" in row and has_value(row["publication affected individuals"]):
                     publications[0]["affectedIndividuals"] = row["publication affected individuals"]
                 
                 # Append the publication consanguinity only if the PMID is valid
-                if "publication consanguinity" in row and str(row["publication consanguinity"]) != "nan":
+                if "publication consanguinity" in row and has_value(row["publication consanguinity"]):
                     publications[0]["consanguineous"] = row["publication consanguinity"]
 
                 # Append the publication ancestry only if the PMID is valid
-                if "publication families ancestry" in row and str(row["publication families ancestry"]) != "nan":
+                if "publication families ancestry" in row and has_value(row["publication families ancestry"]):
                     publications[0]["ancestries"] = row["publication families ancestry"]
 
             # Validate the mechanism evidence (if applicable)
             # The evidence is linked to the publication
             # Example: 'Function:Biochemical,protein interaction;Rescue:Non-Human Model Organism'
             mechanism_evidence = []
-            if valid_record and "publication molecular mechanism evidence" in row and str(row["publication molecular mechanism evidence"]) != "nan":
+            if valid_record and "publication molecular mechanism evidence" in row and has_value(row["publication molecular mechanism evidence"]):
                 evidence_obj = {
-                    "pmid": row['publication'],
+                    "pmid": pmid,
                     "description": "",
                     "evidence_types": []
                 }
@@ -283,7 +338,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Get disease OMIM/Mondo IDs
             cross_references = []
-            if "disease mim" in row and str(row["disease mim"]) != "nan":
+            if "disease mim" in row and has_value(row["disease mim"]):
                 try:
                     omim_disease_name = g2p_disease_ids[str(row["disease mim"])]
                 except KeyError:
@@ -297,7 +352,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                         "disease_name": omim_disease_name,
                         "original_disease_name": omim_disease_name
                     })
-            if "disease MONDO" in row and str(row["disease MONDO"]) != "nan":
+            if "disease MONDO" in row and has_value(row["disease MONDO"]):
                 try:
                     mondo_disease_name = g2p_disease_ids[row["disease MONDO"]]
                 except KeyError:
@@ -314,7 +369,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Get cross cutting modifier
             cross_cutting_modifier = []
-            if "cross cutting modifier" in row and str(row["cross cutting modifier"]) != "nan":
+            if "cross cutting modifier" in row and has_value(row["cross cutting modifier"]):
                 for ccm in re.split(r'\;\s*', row["cross cutting modifier"]):
                     try:
                         g2p_attribs["cross_cutting_modifier"][ccm]
@@ -328,7 +383,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
             # Validate phenotypes
             # Example: 'HP:0001897;HP:0000098'
             phenotypes = []
-            if "publication phenotypes" in row and str(row["publication phenotypes"]) != "nan":
+            if "publication phenotypes" in row and has_value(row["publication phenotypes"]):
                 hpo_terms = []
                 for hpo_id in re.split(r'\;\s*', row["publication phenotypes"]):
                     hpo_response = validate_phenotype(hpo_id)
@@ -342,24 +397,24 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                             "accession": hpo_id
                         })
                 phenotypes.append({
-                    "pmid": row["publication"],
+                    "pmid": pmid,
                     "summary": "",
                     "hpo_terms": hpo_terms
                 })
 
             # Validate variant descriptions (HGVS)
             variant_descriptions = []
-            if "publication variant descriptions" in row and str(row["publication variant descriptions"]) != "nan":
+            if "publication variant descriptions" in row and has_value(row["publication variant descriptions"]):
                 for hgvs in re.split(r'\;\s*', row["publication variant descriptions"]):
                     variant_descriptions.append({
                         "description": hgvs,
-                        "publication": row["publication"]
+                        "publication": pmid
                     })
 
             # Validate variant types - linked to the publication
             # Example: 'inframe_insertion (unknown_inheritance); inframe_deletion'
             variant_types = []
-            if "publication variant types" in row and str(row["publication variant types"]) != "nan":
+            if "publication variant types" in row and has_value(row["publication variant types"]):
                 # The structure of the variant types is different - we have to use the key now to get the existing variant
                 # types for this variant
                 existing_variant_types = None
@@ -398,7 +453,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                         for existing_var_type in existing_variant_types:
                             if variant_type_clean == existing_var_type["secondary_type"]:
                                 new = False
-                                existing_var_type["supporting_papers"].append(row["publication"])
+                                existing_var_type["supporting_papers"].append(pmid)
                             new_variant_types_list.append(existing_var_type)
                         
                         if new:
@@ -409,7 +464,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                             "nmd_escape": False, # TODO
                             "primary_type": "",
                             "secondary_type": variant_type_clean,
-                            "supporting_papers": [row["publication"]],
+                            "supporting_papers": [pmid],
                             "unknown_inheritance": unknown_inheritance
                         })
                         variant_types = new_variant_types_list
@@ -422,18 +477,18 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                             "nmd_escape": False, # TODO
                             "primary_type": "",
                             "secondary_type": variant_type_clean,
-                            "supporting_papers": [row["publication"]],
+                            "supporting_papers": [pmid],
                             "unknown_inheritance": unknown_inheritance
                         })
                         variant_types = new_variant_types_list
 
-            # Start processing the format of the data
+                # Start processing the format of the data
             if key not in records_to_load and valid_record:
                 public_comment = ""
-                if row["public comment"] and str(row["public comment"]) != "nan":
+                if "public comment" in row and has_value(row["public comment"]):
                     public_comment = re.sub(r'[\n\r]+', ' ', row["public comment"])
                 private_comment = ""
-                if row["private comment"] and str(row["private comment"]) != "nan":
+                if "private comment" in row and has_value(row["private comment"]):
                     private_comment = re.sub(r'[\n\r]+', ' ', row["private comment"])
 
                 # Prepare data to be send to the API
@@ -485,13 +540,13 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
                 # print("\nUpdated:", records_to_load[key])
 
             if not valid_record:
-                for key in row:
-                    wr.write(f"{key}: {row[key]}\t")
+                for column_name in row:
+                    wr.write(f"{column_name}: {row[column_name]}\t")
                 wr.write(f"Cannot load record: {';'.join(errors)}\n")
                 can_import = False
 
-                if key not in invalid_records:
-                    invalid_records[key] = 1
+                if record_key not in invalid_records:
+                    invalid_records[record_key] = 1
 
     global n_invalid_records
     n_invalid_records = len(invalid_records)
@@ -524,8 +579,8 @@ def load_data(api_url, api_username, api_password, records_to_load):
             except Exception as e:
                 print(f"Record: {record}; Error:", e)
             else:
-                # The endpoint to create drafts returns 201 when a draft is successfully created
-                if response_create_draft.status_code == 201:
+                # The endpoint to create drafts returns 200 when a draft is successfully created
+                if response_create_draft.status_code == 200:
                     response_json = response_create_draft.json()
                     new_g2p_record = response_json["result"]
                     try:
@@ -537,7 +592,7 @@ def load_data(api_url, api_username, api_password, records_to_load):
                     except Exception as e:
                         print(f"Error to publish {new_g2p_record}:", e)
                     else:
-                        if response_publish.status_code == 200:
+                        if response_publish.status_code == 201:
                             records_created.append(new_g2p_record)
                         else:
                             print(f"Failed to publish {new_g2p_record}:", response_publish.status_code, response_publish.json())
