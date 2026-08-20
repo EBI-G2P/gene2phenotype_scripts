@@ -75,6 +75,9 @@ from pandas import read_excel, read_csv, isna
 
                 Notes:
                     - Multi-value fields are separated by ';'
+                    - At least one of inferred variant consequence or
+                      evidence based variant consequence must be populated
+                      for each row
                     - Inferred and evidence based variant consequences use G2P
                       ontology terms and may be provided with '_' in the input
                       file; they are converted to spaces before validation
@@ -120,7 +123,7 @@ def read_file(file):
 
     return file_data
 
-def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report):
+def prepare_data(api_url, data_to_load, g2p_records, g2p_drafts, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report):
     records_to_load = {} # key: unique key identifying the record; value: json obj
     invalid_records = {}
     can_import = True
@@ -141,6 +144,14 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
             record_key = key
             if record_key in g2p_records:
                 message = f"Record already in G2P: {g2p_records[record_key]['stable_id']}"
+                errors.append(message)
+                valid_record = False
+            if record_key in g2p_drafts:
+                existing_drafts = ", ".join(
+                    f"{draft['stable_id']} ({draft['type']})"
+                    for draft in g2p_drafts[record_key]
+                )
+                message = f"Record already under curation: {existing_drafts}"
                 errors.append(message)
                 valid_record = False
 
@@ -219,7 +230,15 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
             # Validate the inferred variant consequences
             # In G2P the consequence values do not include '_'
             variant_consequences = []
-            if has_value(row["inferred variant consequence"]):
+            has_inferred_variant_consequence = has_value(row["inferred variant consequence"])
+            has_evidence_variant_consequence = has_value(row["evidence based variant consequence"])
+
+            if not has_inferred_variant_consequence and not has_evidence_variant_consequence:
+                message = "At least one variant consequence must be provided in 'inferred variant consequence' or 'evidence based variant consequence'"
+                errors.append(message)
+                valid_record = False
+
+            if has_inferred_variant_consequence:
                 for var_cons in re.split(r'\;\s*', row["inferred variant consequence"].replace("_", " ")):
                     try:
                         g2p_ontology[var_cons]
@@ -235,7 +254,7 @@ def prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p
 
             # Validate the evidence based variant consequences
             # In G2P the consequence values do not include '_'
-            if has_value(row["evidence based variant consequence"]):
+            if has_evidence_variant_consequence:
                 for var_cons in re.split(r'\;\s*', row["evidence based variant consequence"].replace("_", " ")):
                     try:
                         g2p_ontology[var_cons]
@@ -603,6 +622,44 @@ def load_data(api_url, api_username, api_password, records_to_load):
 
     return records_created
 
+def fetch_g2p_drafts(api_url, api_username, api_password):
+    g2p_drafts = {}
+    login_url = f"{api_url.rstrip('/')}/login/"
+    curation_url = f"{api_url.rstrip('/')}/curations/?scope=all&type="
+
+    response = requests.post(
+        login_url,
+        json={"username": api_username, "password": api_password}
+    )
+    if response.status_code != 200:
+        sys.exit("Error: cannot login into G2P to fetch existing drafts")
+
+    cookies = requests.utils.dict_from_cookiejar(response.cookies)
+    for curation_type in ("manual", "automatic"):
+        response_drafts = requests.get(curation_url + curation_type, cookies=cookies)
+        if response_drafts.status_code != 200:
+            sys.exit(f"Error: cannot fetch existing {curation_type} drafts from G2P")
+
+        response_json = response_drafts.json()
+        for draft in response_json["results"]:
+            key = (
+                draft["locus"]
+                + "-"
+                + str(draft["disease"])
+                + "-"
+                + str(draft["allelic_requirement"])
+                + "-"
+                + str(draft["molecular_mechanism"])
+            )
+            if key not in g2p_drafts:
+                g2p_drafts[key] = []
+            g2p_drafts[key].append({
+                "stable_id": draft["stable_id"],
+                "type": draft["type"],
+            })
+
+    return g2p_drafts
+
 def dump_g2p_records(db_host, db_port, db_name, user, password):
     g2p_records = {}
 
@@ -829,6 +886,8 @@ def main():
 
     # Pre-fetch G2P records
     g2p_records = dump_g2p_records(db_host, db_port, db_name, user, password)
+    # Pre-fetch G2P drafts
+    g2p_drafts = fetch_g2p_drafts(api_url, api_username, api_password)
     # Pre-fetch G2P attribs (genotype, mechanism, confidence, etc.)
     g2p_attribs = dump_g2p_attribs(db_host, db_port, db_name, user, password)
     # Pre-fetch G2P genes
@@ -843,7 +902,7 @@ def main():
     g2p_mechanisms = dump_g2p_mechanisms(db_host, db_port, db_name, user, password)
 
     # Prepare the data to be imported
-    records_to_load, can_import = prepare_data(api_url, data_to_load, g2p_records, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report)
+    records_to_load, can_import = prepare_data(api_url, data_to_load, g2p_records, g2p_drafts, g2p_attribs, g2p_genes, g2p_panels, g2p_ontology, g2p_disease_ids, g2p_mechanisms, report)
 
     n_records_to_load = len(records_to_load)
 
