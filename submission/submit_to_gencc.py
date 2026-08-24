@@ -35,6 +35,9 @@ confidence_category = {
 }
 submitter_id = "GENCC:000112"
 submitter_name = "G2P"
+gencc_export_url = (
+    "https://thegencc.org/download/action/submissions-export-xlsx?format=new"
+)
 
 
 def fetch_g2p_records(data: dict[str, Any]) -> list:
@@ -58,6 +61,35 @@ def fetch_g2p_records(data: dict[str, Any]) -> list:
 
     else:
         sys.exit(f"Issues downloading the G2P file from {url}")
+
+
+def download_gencc_file(output_dir: Path) -> Path:
+    """
+    Download the latest GenCC submissions export file.
+
+    Args:
+        output_dir (Path): Directory where the downloaded file will be saved
+
+    Returns:
+        Path: Local path to the downloaded file
+    """
+    output_file = output_dir / "gencc-submissions.xlsx"
+
+    try:
+        response = requests.get(gencc_export_url, timeout=120)
+    except requests.RequestException as exc:
+        sys.exit(f"Failed to download GenCC file from {gencc_export_url}: {exc}")
+
+    if response.status_code != 200:
+        sys.exit(
+            f"Failed to download GenCC file from {gencc_export_url}. "
+            f"Status code: {response.status_code}"
+        )
+
+    with open(output_file, "wb") as handle:
+        handle.write(response.content)
+
+    return output_file
 
 
 def write_to_the_GenCC_file(
@@ -112,7 +144,7 @@ def write_to_the_GenCC_file(
                 continue
 
             g2p_id = record["g2p id"]
-            hgnc_id = "HGNC:"+record["hgnc id"]
+            hgnc_id = "HGNC:" + record["hgnc id"]
             hgnc_symbol = record["gene symbol"]
 
             if "disease id" in record:
@@ -138,7 +170,7 @@ def write_to_the_GenCC_file(
                 continue
 
             if disease_id.isdigit():
-                disease_id = "OMIM:"+disease_id
+                disease_id = "OMIM:" + disease_id
 
             disease_name = record["disease name"]
 
@@ -195,7 +227,9 @@ def convert_txt_to_excel(input_file: Path, output_file: Path):
 
     with open(input_file, "r") as file:
         for row_index, line in enumerate(file, start=1):
-            for col_index, value in enumerate(line.rstrip("\n").split(delimiter), start=1):
+            for col_index, value in enumerate(
+                line.rstrip("\n").split(delimiter), start=1
+            ):
                 ws.cell(row=row_index, column=col_index, value=value)
     wb.save(output_file)
 
@@ -294,7 +328,9 @@ def handle_existing_submission(
         key_by_mondo = f"{g2p_record['gene symbol']}---{g2p_mondo_id}---{g2p_record['allelic requirement']}---{g2p_record['molecular mechanism']}"
 
         if key_by_mondo in duplicated_records and g2p_mondo_id:
-            records_with_issues.append(f"{g2p_id}\tfound duplicated record {duplicated_records[key_by_mondo]}")
+            records_with_issues.append(
+                f"{g2p_id}\tfound duplicated record {duplicated_records[key_by_mondo]}"
+            )
         else:
             duplicated_records[key_by_mondo] = g2p_id
 
@@ -352,7 +388,7 @@ def handle_existing_submission(
 
     with open(output_file_issues, mode="a") as textfile:
         for issue_info in records_with_issues:
-            textfile.write(issue_info+"\n")
+            textfile.write(issue_info + "\n")
 
     return outfile, outfile_updated_records, outfile_deleted_records
 
@@ -405,7 +441,7 @@ def read_exceptions_file(exceptions_file: Path) -> dict:
     Read the exceptions file and return a dictionary with the G2P ID as key and the rule as value.
 
     Args:
-        exceptions_file (Path): File with the list of exceptions to be considered when handling the submission  
+        exceptions_file (Path): File with the list of exceptions to be considered when handling the submission
     """
     exceptions_dict = {}
 
@@ -439,9 +475,9 @@ def main():
     )
     ap.add_argument(
         "--gencc_file",
-        required=True,
+        required=False,
         type=Path,
-        help="Latest GenCC data file",
+        help="Latest GenCC data file (Format: xlsx). If not provided, the script will download the latest GenCC data file from the GenCC website.",
     )
     ap.add_argument(
         "--exceptions_file",
@@ -450,9 +486,6 @@ def main():
         help="File with the list of exceptions to be considered when handling the submission",
     )
     args = ap.parse_args()
-
-    if args.gencc_file and not os.path.isfile(args.gencc_file):
-        sys.exit(f"Invalid file '{args.gencc_file}'")
 
     db_config = read_from_config_file(args.config_file)
 
@@ -473,6 +506,8 @@ def main():
     # File to save records that are going to be re-submitted (expected format for GenCC)
     final_output_file_updated = gencc_dir / "G2P_GenCC_updated_records.xlsx"
 
+    gencc_file = args.gencc_file
+
     print("Getting G2P records from the API...")
     g2p_data = fetch_g2p_records(db_config)
     print("Getting G2P records from the API... done")
@@ -492,18 +527,28 @@ def main():
         )
         print("Handling new submission... done")
     else:
-        print("\nHandling existing submission...")
-        print(f"Getting G2P data from GenCC file {args.gencc_file}")
-        gencc_g2p_data = get_gencc_g2p_data(args.gencc_file)
+        if gencc_file:
+            if not os.path.isfile(gencc_file):
+                sys.exit(f"Invalid file '{gencc_file}'")
+        else:
+            print(f"\nDownloading GenCC data from {gencc_export_url}...")
+            gencc_file = download_gencc_file(gencc_dir)
+            print(f"Downloading GenCC data from {gencc_export_url}... done")
 
-        outfile, outfile_updated_records, outfile_deleted_records = handle_existing_submission(
-            g2p_data,
-            exceptions_dict,
-            output_file,
-            output_file_updated,
-            output_file_issues,
-            output_file_deleted,
-            gencc_g2p_data,
+        print("\nHandling existing submission...")
+        print(f"Getting G2P data from GenCC file {gencc_file}")
+        gencc_g2p_data = get_gencc_g2p_data(gencc_file)
+
+        outfile, outfile_updated_records, outfile_deleted_records = (
+            handle_existing_submission(
+                g2p_data,
+                exceptions_dict,
+                output_file,
+                output_file_updated,
+                output_file_issues,
+                output_file_deleted,
+                gencc_g2p_data,
+            )
         )
 
     print("\nConverting text file to Excel file...")
