@@ -346,7 +346,7 @@ def handle_existing_submission(
             records_to_submit.append(g2p_record)
         else:
             gencc_row = gencc_g2p_data[g2p_id]
-            old_confidence = gencc_row["classification_title"].lower()
+            old_confidence = gencc_row["classification_title"].lower().replace(" evidence", "")
             old_submitted_disease_id = gencc_row["submitted_as_disease_id"].replace(
                 "OMIM:", ""
             )  # not sure we submitted this one
