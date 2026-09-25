@@ -326,7 +326,7 @@ def build_clingen_mechanism_evidence(record: dict) -> str:
             f"Explanation: {exp_evidence.get('explanation', '')}"
         )
 
-    return "\n".join(evidence_parts)
+    return "\n\n".join(evidence_parts)
 
 
 def validate_gemini_clingen_record(record: dict) -> None:
