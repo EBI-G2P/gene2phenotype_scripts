@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import datetime
 import json
 import os.path
 import sys
@@ -10,6 +11,16 @@ from html.parser import HTMLParser
 import requests
 
 REQUEST_TIMEOUT_SECONDS = 30
+DEFAULT_OUTPUT_FILE_PREFIX = "clingen_extracted_data"
+REQUIRED_INPUT_COLUMNS = {
+    "GENE SYMBOL",
+    "GENE ID (HGNC)",
+    "DISEASE LABEL",
+    "DISEASE ID (MONDO)",
+    "CLASSIFICATION",
+    "GCEP",
+    "ONLINE REPORT",
+}
 EXPERIMENTAL_EVIDENCE_FIELD_ALIASES = {
     "label": "label",
     "experimental category": "experimental_category",
@@ -24,7 +35,11 @@ EXPERIMENTAL_EVIDENCE_FIELD_ALIASES = {
 Script to extract the ClinGen evidence summary and experimental evidence.
 
 Options:
-        --input_file:    ClinGen gene-disease validity (supported format: csv)
+        --input_file (mandatory):   ClinGen gene-disease validity (supported format: csv)
+                                    Download from: https://search.clinicalgenome.org/kb/downloads#section_gene-disease-validity
+                                    File section: "Gene-Disease Validity Curations"
+
+        --output_file (optional):   Output JSON file (default: clingen_extracted_data_YYYY-MM-DD.json)
 
 Example how to run:
     python fetch_clingen.py --input_file Clingen-Gene-Disease-Summary-2025-11-11.csv
@@ -65,7 +80,7 @@ class EvidenceSummaryParser(HTMLParser):
             return
 
         # Detect the label containing the evidence we want to extract
-        if text == "Evidence Summary:":
+        if _normalize_cell_value(text).casefold().rstrip(":").strip() == "evidence summary":
             self.just_saw_label = True
             return
 
@@ -84,7 +99,6 @@ class ExperimentalEvidenceTableParser(HTMLParser):
         self.in_heading = False
         self.heading_parts = []
         self.in_section = False
-        self.stop_section = False
         self.in_table = False
         self.tables = []
         self.current_table = []
@@ -95,8 +109,6 @@ class ExperimentalEvidenceTableParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if tag in {"h1", "h2", "h3", "h4"}:
-            if self.in_section:
-                self.stop_section = True
             self.in_heading = True
             self.heading_parts = []
 
@@ -118,12 +130,11 @@ class ExperimentalEvidenceTableParser(HTMLParser):
     def handle_endtag(self, tag):
         if tag in {"h1", "h2", "h3", "h4"} and self.in_heading:
             heading_text = " ".join(self.heading_parts).strip()
-            normalized_heading = " ".join(heading_text.split())
+            normalized_heading = _normalize_cell_value(heading_text).casefold()
 
-            if normalized_heading.startswith("EXPERIMENTAL EVIDENCE"):
+            if normalized_heading.startswith("experimental evidence"):
                 self.in_section = True
-                self.stop_section = False
-            elif self.stop_section and self.in_section:
+            elif self.in_section and normalized_heading.startswith("total points"):
                 self.in_section = False
 
             self.in_heading = False
@@ -165,15 +176,22 @@ def load_data(file: str) -> List[Dict[str, str]]:
     Read the ClinGen file
     """
     with open(file, "r", encoding='utf-8') as fh:
-        header = []
+        header = ""
 
         for line in fh:
             if line.startswith('"GENE SYMBOL"') or line.startswith("GENE SYMBOL"):
                 header = line
                 break      
 
+        if not header:
+            sys.exit("ERROR: Could not find ClinGen CSV header row starting with 'GENE SYMBOL'")
+
         # Create DictReader using the header
         reader = csv.DictReader([header] + list(fh), skipinitialspace=True)
+        missing_columns = REQUIRED_INPUT_COLUMNS - set(reader.fieldnames or [])
+        if missing_columns:
+            missing_columns_list = ", ".join(sorted(missing_columns))
+            sys.exit(f"ERROR: ClinGen CSV is missing required columns: {missing_columns_list}")
 
         # Read rows skipping separator rows (++++++++)
         rows = []
@@ -257,30 +275,61 @@ def extract_experimental_evidence(html_text: str) -> List[Dict[str, str]]:
     return records
 
 
-def process_clingen_data(clingen_data: List[Dict[str, str]]) -> None:
-    output_file = "clingen_extracted_data.json"
+def default_output_file() -> str:
+    today = datetime.date.today().isoformat()
+    return f"{DEFAULT_OUTPUT_FILE_PREFIX}_{today}.json"
+
+
+def write_output(output_file: str, final_data: List[Dict[str, str]]) -> None:
+    temp_output_file = f"{output_file}.tmp"
+    with open(temp_output_file, "w", encoding="utf-8") as fw:
+        json.dump(final_data, fw, ensure_ascii=False, indent=2)
+    os.replace(temp_output_file, output_file)
+
+
+def warn_empty_data(
+    gene_symbol: str,
+    disease: str,
+    url: str,
+    evidence_summary: List[str],
+    experimental_evidence: List[Dict[str, str]],
+) -> None:
+    context = f"{gene_symbol} / {disease} ({url})"
+    if not evidence_summary:
+        print(f"WARNING: No evidence summary extracted for {context}", file=sys.stderr)
+    if not experimental_evidence:
+        print(f"WARNING: No experimental evidence extracted for {context}", file=sys.stderr)
+
+
+def process_clingen_data(clingen_data: List[Dict[str, str]], output_file: str) -> None:
     final_data = []
 
     for row in clingen_data:
         url = row["ONLINE REPORT"]
+        gene_symbol = row["GENE SYMBOL"]
+        disease = row["DISEASE LABEL"]
 
-        response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
         try:
+            response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
             response.raise_for_status()
-        except requests.exceptions.HTTPError:
-            if response.status_code == 500:
-                print(f"Skipping URL with 500 error: {url}", file=sys.stderr)
-                continue
-            raise
+        except requests.exceptions.RequestException as error:
+            print(
+                f"WARNING: Skipping {gene_symbol} / {disease} ({url}): {error}",
+                file=sys.stderr,
+            )
+            write_output(output_file, final_data)
+            continue
+
         parser = EvidenceSummaryParser()
         parser.feed(response.text)
         evidence_summary = parser.all_summaries
         experimental_evidence = extract_experimental_evidence(response.text)
+        warn_empty_data(gene_symbol, disease, url, evidence_summary, experimental_evidence)
 
         final_data.append({
-            "gene_symbol": row["GENE SYMBOL"],
+            "gene_symbol": gene_symbol,
             "hgnc_id": row["GENE ID (HGNC)"],
-            "disease": row["DISEASE LABEL"],
+            "disease": disease,
             "mondo_id": row["DISEASE ID (MONDO)"],
             "confidence": row["CLASSIFICATION"],
             "clingen_panel": row["GCEP"],
@@ -288,9 +337,9 @@ def process_clingen_data(clingen_data: List[Dict[str, str]]) -> None:
             "experimental_evidence": experimental_evidence,
             "url": url
         })
+        write_output(output_file, final_data)
 
-    with open(output_file, "w", encoding="utf-8") as fw:
-        json.dump(final_data, fw, ensure_ascii=False, indent=2)
+    write_output(output_file, final_data)
 
 
 def main():
@@ -301,6 +350,11 @@ def main():
         "--input_file",
         required=True,
         help="ClinGen gene-disease validity input file (csv)"
+    )
+    parser.add_argument(
+        "--output_file",
+        default=default_output_file(),
+        help="Output JSON file (default: clingen_extracted_data_YYYY-MM-DD.json)"
     )
     args = parser.parse_args()
 
@@ -313,7 +367,7 @@ def main():
 
     # Extract the evidence summary from the ClinGen URL
     # Write output data to a json file
-    process_clingen_data(clingen_data)
+    process_clingen_data(clingen_data, args.output_file)
 
 if __name__ == "__main__":
     main()
