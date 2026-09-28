@@ -948,7 +948,7 @@ def prepare_draft_records_immuno(
         if "disease_id" in clingen_record and clingen_record["disease_id"] != "" and clingen_record["disease_id"] != []:
             omim_list = clingen_record["disease_id"].split(",")
             for omim_id in omim_list:
-                if omim_id.startswith("OMIM:") or omim_id.startswith("MIM:"):
+                if omim_id.startswith(("OMIM:", "MIM:")):
                     omim_id = omim_id.replace("OMIM:", "")
                     omim_id = omim_id.replace("MIM:", "")
                     if omim_id.strip().isdigit():
