@@ -3,8 +3,8 @@
 import argparse
 import configparser
 import json
+import os
 import sys
-import time
 from pathlib import Path
 from google import genai
 from google.genai.types import HttpOptions
@@ -24,13 +24,18 @@ Options:
                             location = <> # Location for the Gemini model (default: europe-west2)
                             project = <>
         --input_file:    Input JSON file with ClinGen evidence summaries (mandatory)
-        -l \ --limit:         Process N entries and exit (default: all)
-        --rpm:           Max requests per minute (default: 10)
+        --output_file:   Output JSON file with Gemini analysis (default: <input_stem>_gemini.json)
+        -l/--limit:      Process N entries and exit (default: all)
         --clingen_panel: Run the analysis only for records in the specific ClinGen panel (default: all)
+
+The input file is read-only. The script writes analysed records to the output file.
+If the output file already exists, records already present in that file are skipped
+so interrupted runs can be resumed.
 
 Example usage:
     python gemini_analise_clingen.py \
-        --input_file clingen_extracted_data.json \
+        --input_file clingen_extracted_data_2026-09-25.json \
+        --output_file clingen_extracted_data_2026-09-25_gemini.json \
         --config config.ini \
         --clingen_panel "Hearing Loss Gene Curation Expert Panel"
 """
@@ -39,6 +44,20 @@ Example usage:
 def run_process(args):
     with args.input_file.open("rt") as fh:
         clingen_data = json.load(fh)
+
+    output_file = args.output_file or default_output_file(args.input_file)
+    analysed_data = load_existing_output(output_file)
+    analysed_record_keys = {record_key(record) for record in analysed_data}
+    records_to_process = [
+        record
+        for record in clingen_data
+        if record_key(record) not in analysed_record_keys
+        and (not args.clingen_panel or args.clingen_panel == record["clingen_panel"])
+    ]
+
+    if not records_to_process:
+        write_output(output_file, analysed_data)
+        return
 
     # Get the Gemini model details from the config file
     config = configparser.ConfigParser()
@@ -65,19 +84,7 @@ def run_process(args):
     try:
         done = 0
 
-        if args.rpm > 0:
-            secs = 60.0 / args.rpm
-        else:
-            secs = 0
-
-        for record in clingen_data:
-            if "pmids" in record:
-                continue
-
-            if args.clingen_panel:
-                if args.clingen_panel != record["clingen_panel"]:
-                    continue
-
+        for record in records_to_process:
             output = process_publication(client, record, args.model)
             record["pmids"] = output.pmids
             record["disease_id"] = output.disease_id
@@ -86,6 +93,8 @@ def run_process(args):
             record["phenotypes"] = output.phenotypes
             record["evidence"] = output.experimental_evidence
             record["comment"] = output.comment
+            analysed_data.append(record)
+            analysed_record_keys.add(record_key(record))
 
             print(
                 f"\nClinGen record gene: {record['gene_symbol']}, disease: {record['disease']}",
@@ -103,13 +112,40 @@ def run_process(args):
             print(f"Comment             : {output.comment}", file=sys.stderr)
 
             done += 1
+            write_output(output_file, analysed_data)
             if done == args.limit:
                 return
-
-            time.sleep(secs)
     finally:
-        with args.input_file.open("wt") as fh:
-            json.dump(clingen_data, fh, indent=2)
+        write_output(output_file, analysed_data)
+
+
+def default_output_file(input_file: Path) -> Path:
+    return input_file.with_name(f"{input_file.stem}_gemini{input_file.suffix}")
+
+
+def load_existing_output(output_file: Path) -> list:
+    if not output_file.is_file():
+        return []
+
+    with output_file.open("rt") as fh:
+        return json.load(fh)
+
+
+def write_output(output_file: Path, data: list) -> None:
+    temp_output_file = output_file.with_name(f"{output_file.name}.tmp")
+    with temp_output_file.open("wt") as fh:
+        json.dump(data, fh, indent=2)
+    os.replace(temp_output_file, output_file)
+
+
+def record_key(record: dict) -> tuple:
+    return (
+        record.get("gene_symbol", ""),
+        record.get("disease", ""),
+        record.get("mondo_id", ""),
+        record.get("clingen_panel", ""),
+        record.get("url", ""),
+    )
 
 
 def load_json_key(key_file):
@@ -199,6 +235,12 @@ def main():
         help="Input JSON file with ClinGen evidence summaries"
     )
     parser.add_argument(
+        "--output_file",
+        type=Path,
+        default=None,
+        help="Output JSON file with Gemini analysis (default: <input_stem>_gemini.json)",
+    )
+    parser.add_argument(
         "--config",
         type=Path,
         required=True,
@@ -211,9 +253,6 @@ def main():
         default=0,
         metavar="N",
         help="Process N entries and exit (default: all)",
-    )
-    parser.add_argument(
-        "--rpm", type=int, default=10, help="Max requests per minute (default: 10)"
     )
     parser.add_argument(
         "--clingen_panel",
