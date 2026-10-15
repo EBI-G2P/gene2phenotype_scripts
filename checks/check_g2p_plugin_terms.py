@@ -20,8 +20,15 @@ Description:
     The unsupported confidence levels disputed and refuted are ignored.
     This script only flags missing terms, it never changes the plugin.
 
+Options:
+    --url     : G2P API attribs endpoint (optional, default= Live G2P API URL)
+    --timeout : HTTP timeout in seconds (optional, default=30)
+    --quiet   : Print only missing terms or errors (optional)
+    --email-config : Path to the EBI SMTP INI configuration file with an [email] section (optional)
+                     If provided, an email will be sent to the mailing list if any terms are missing.
+
 How to run the script:
-    python scripts/check_g2p_terms.py --email-config /path/to/config.ini
+    python scripts/check_g2p_plugin_terms.py --email-config /path/to/config.ini
 
 Output:
     0 = covered
