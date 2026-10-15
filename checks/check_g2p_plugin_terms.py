@@ -19,8 +19,6 @@ Description:
     Legacy plugin terms absent from the G2P API are allowed.
     The unsupported confidence levels disputed and refuted are ignored.
     This script only flags missing terms, it never changes the plugin.
-    Optional email notifications use an INI [email] section (see g2p_email.ini.example).
-    Email is sent only for missing terms when send_to_mailing_list=True.
 
 How to run the script:
     python scripts/check_g2p_terms.py --email-config /path/to/config.ini
