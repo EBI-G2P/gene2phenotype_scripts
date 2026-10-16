@@ -28,7 +28,7 @@ Options:
                      If provided, an email will be sent to the mailing list if any terms are missing.
 
 How to run the script:
-    python scripts/check_g2p_plugin_terms.py --email-config /path/to/config.ini
+    python check_g2p_plugin_terms.py --email-config /path/to/config.ini
 
 Output:
     0 = covered
