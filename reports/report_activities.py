@@ -146,6 +146,8 @@ def get_record_update(activity_list: list, log_date: str) -> list:
                 previous_data = activity_list[idx + 1]
 
                 # Check what is different
+                if current_data["genotype"] != previous_data["genotype"]:
+                    update += f" from genotype '{previous_data['genotype']}' to '{current_data['genotype']}';"
                 if current_data["confidence"] != previous_data["confidence"]:
                     update += f" from confidence '{previous_data['confidence']}' to '{current_data['confidence']}';"
                 if current_data["mechanism"] != previous_data["mechanism"]:
