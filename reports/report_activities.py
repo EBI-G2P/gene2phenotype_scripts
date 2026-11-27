@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import os.path
 import sys
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import requests
 from fpdf import FPDF
@@ -11,16 +13,23 @@ from fpdf.enums import XPos, YPos
 
 
 """
-    Description: Script to generate a report of data updates from the last 7 days.
-                 It writes two report files:
+    Description: Script to generate a report of data updates since a date cutoff
+                 (defaults to 7 days ago).
+                 The default mode writes two report files:
                     - report_all_updates_YYYY-MM-DD.pdf
                     - report_updates_YYYY-MM-DD.pdf
+
+                 With --confidence-only, report confidence updates since the
+                 cutoff as report_confidence_updates_YYYY-MM-DD.pdf
+                 and report_confidence_updates_YYYY-MM-DD.csv.
 
     Options:
             --api-url      : G2P API URL (mandatory)
             --api-username : Username to connect to the G2P API (mandatory)
             --api-password : Password to connect to the G2P API (mandatory)
             --output-dir   : Path to the output directory where the report is going to be saved (mandatory)
+            --confidence-only : Report only confidence updates since the cutoff
+            --date-cutoff  : Inclusive start date in YYYY-MM-DD format (default: 7 days ago)
     """
 
 
@@ -51,14 +60,14 @@ def logout(api_url: str, cookies: requests.cookies.RequestsCookieJar) -> None:
 
 
 def get_activity_logs(
-    api_url: str, seven_days_ago: datetime, cookies: requests.cookies.RequestsCookieJar
+    api_url: str, date_cutoff: date, cookies: requests.cookies.RequestsCookieJar
 ) -> list:
     """
-    Fetch the activity logs of the last 7 days.
+    Fetch the activity logs on or after the date cutoff.
 
     Args:
         api_url (str): G2P API URL
-        seven_days_ago (datetime): date from 7 days ago
+        date_cutoff (date): inclusive start date for activity logs
         cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
 
     Returns:
@@ -67,18 +76,18 @@ def get_activity_logs(
     url = f"{api_url.rstrip('/')}/activity_logs/?date_cutoff="
     activity_list = []
 
-    url_last_week = url + str(seven_days_ago)
+    next_url = url + date_cutoff.isoformat()
 
-    while url_last_week:
+    while next_url:
         try:
-            response = requests.get(url_last_week, cookies=cookies)
+            response = requests.get(next_url, cookies=cookies)
         except Exception as e:
-            sys.exit("Error while fetching activity logs:", str(e))
+            sys.exit(f"Error while fetching activity logs: {e}")
         else:
             if response.status_code == 200:
                 result = response.json()
                 activity_list += result["results"]
-                url_last_week = result["next"]
+                next_url = normalise_next_url(api_url, result["next"])
             else:
                 sys.exit(
                     f"Failed to fetch activity logs from API. Status code: {response.status_code}"
@@ -88,7 +97,10 @@ def get_activity_logs(
 
 
 def get_record_activity_logs(
-    api_url: str, stable_id: str, cookies: requests.cookies.RequestsCookieJar
+    api_url: str,
+    stable_id: str,
+    cookies: requests.cookies.RequestsCookieJar,
+    date_cutoff: date | None = None,
 ) -> list:
     """
     Fetch the activity logs for the specific record.
@@ -97,6 +109,8 @@ def get_record_activity_logs(
         api_url (str): G2P API URL
         stable_id (str): G2P stable ID of the record
         cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
+        date_cutoff (date | None): if provided, stop after the first record snapshot
+            before this date, retaining it as the baseline for comparisons
 
     Returns:
         list: list of logs
@@ -108,7 +122,7 @@ def get_record_activity_logs(
         try:
             response = requests.get(url_record_activity, cookies=cookies)
         except Exception as e:
-            sys.exit("Error while fetching activity logs:", str(e))
+            sys.exit(f"Error while fetching activity logs: {e}")
         else:
             if response.status_code == 200:
                 result = response.json()
@@ -116,13 +130,170 @@ def get_record_activity_logs(
                     # We are only interested in the log type "record"
                     if log["data_type"] == "record":
                         activity_list.append(log)
-                url_record_activity = result["next"]
+                        if (
+                            date_cutoff is not None
+                            and datetime.strptime(log["date"], "%Y-%m-%d %H:%M:%S").date()
+                            < date_cutoff
+                        ):
+                            return activity_list
+                url_record_activity = normalise_next_url(api_url, result["next"])
             else:
                 sys.exit(
                     f"Failed to fetch activity logs from API for record {stable_id}. Status code: {response.status_code}"
                 )
 
     return activity_list
+
+
+def normalise_next_url(api_url: str, next_url: str | None) -> str | None:
+    """Keep pagination URLs on the API origin supplied by the user."""
+    if not next_url:
+        return None
+
+    parsed_api = urlparse(api_url)
+    parsed_next = urlparse(next_url)
+    if not parsed_next.netloc:
+        return urljoin(f"{api_url.rstrip('/')}/", next_url)
+
+    return urlunparse(
+        (
+            parsed_api.scheme,
+            parsed_api.netloc,
+            parsed_next.path,
+            parsed_next.params,
+            parsed_next.query,
+            parsed_next.fragment,
+        )
+    )
+
+
+def extract_confidence_updates(
+    activity_by_record: dict[str, list], date_cutoff: date | None = None
+) -> list[dict]:
+    """Return confidence changes newest first, optionally restricted by cutoff."""
+    confidence_updates = []
+
+    for g2p_id, logs in activity_by_record.items():
+        sorted_logs = sorted(
+            logs,
+            key=lambda log: datetime.strptime(log["date"], "%Y-%m-%d %H:%M:%S"),
+            reverse=True,
+        )
+
+        for idx, current_log in enumerate(sorted_logs[:-1]):
+            if (
+                date_cutoff is not None
+                and datetime.strptime(current_log["date"], "%Y-%m-%d %H:%M:%S").date()
+                < date_cutoff
+            ):
+                break
+            previous_log = sorted_logs[idx + 1]
+
+            current_confidence = current_log.get("confidence")
+            previous_confidence = previous_log.get("confidence")
+
+            if current_confidence == previous_confidence:
+                continue
+
+            confidence_updates.append(
+                {
+                    "g2p_id": g2p_id,
+                    "date": current_log["date"],
+                    "user": current_log.get("user", ""),
+                    "change_type": current_log.get("change_type", ""),
+                    "old_confidence": previous_confidence,
+                    "new_confidence": current_confidence,
+                    "disease": current_log.get("disease", ""),
+                    "genotype": current_log.get("genotype", ""),
+                    "mechanism": current_log.get("mechanism", ""),
+                    "is_deleted": current_log.get("is_deleted", ""),
+                    "is_reviewed": current_log.get("is_reviewed", ""),
+                }
+            )
+
+    return sorted(
+        confidence_updates,
+        key=lambda update: datetime.strptime(update["date"], "%Y-%m-%d %H:%M:%S"),
+        reverse=True,
+    )
+
+
+def write_confidence_reports(
+    output_dir: str,
+    confidence_updates: list[dict],
+    date_cutoff: date | None = None,
+) -> tuple[str, str]:
+    """Write the same confidence transitions to a PDF and a UTF-8 CSV."""
+    current_date = datetime.now().date()
+    if date_cutoff is None:
+        date_cutoff = current_date - timedelta(days=7)
+    output_base = os.path.join(output_dir, f"report_confidence_updates_{current_date}")
+    pdf_file = f"{output_base}.pdf"
+    csv_file = f"{output_base}.csv"
+    fieldnames = [
+        "g2p_id",
+        "date",
+        "user",
+        "change_type",
+        "old_confidence",
+        "new_confidence",
+        "disease",
+        "genotype",
+        "mechanism",
+        "is_reviewed",
+        "is_deleted",
+    ]
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", style="B", size=16)
+    pdf.multi_cell(
+        0,
+        7,
+        f"Data updates from {date_cutoff} to {current_date}\n",
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
+    pdf.set_font("helvetica", size=12)
+
+    if not confidence_updates:
+        pdf.multi_cell(
+            0, 5, "No confidence updates found.", new_x=XPos.LMARGIN, new_y=YPos.NEXT
+        )
+
+    updates_by_record = {}
+    for update in confidence_updates:
+        updates_by_record.setdefault(update["g2p_id"], []).append(update)
+
+    for g2p_id, updates in updates_by_record.items():
+        pdf.set_text_color(0, 0, 255)
+        pdf.multi_cell(
+            0,
+            5,
+            f"\n### {g2p_id} ###\n",
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+            link="https://www.ebi.ac.uk/gene2phenotype/lgd/" + g2p_id,
+        )
+        pdf.set_text_color(0, 0, 0)
+        for update in updates:
+            pdf.multi_cell(
+                0,
+                5,
+                f"On {update['date']} {update['user']} {update['change_type']} "
+                f"record {g2p_id}: from confidence '{update['old_confidence']}' "
+                f"to '{update['new_confidence']}';\n",
+                new_x=XPos.LMARGIN,
+                new_y=YPos.NEXT,
+            )
+
+    pdf.output(pdf_file)
+    with open(csv_file, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(confidence_updates)
+
+    return pdf_file, csv_file
 
 
 def get_record_update(activity_list: list, log_date: str) -> list:
@@ -194,17 +365,17 @@ def format_activity_logs(activity_logs: list) -> dict:
 def generate_report(
     output_dir: str,
     activity_logs_by_record: list,
-    seven_days_ago: datetime,
+    date_cutoff: date,
     api_url: str,
     cookies: requests.cookies.RequestsCookieJar,
 ) -> None:
     """
-    Generate the final reports of all the data updates done in the last 7 days.
+    Generate the final reports of data updates since the date cutoff.
 
     Args:
         output_dir (str): directory where the reports are going to be saved
         activity_logs_by_record (dict): list of activity logs for each G2P stable ID
-        seven_days_ago (datetime): date
+        date_cutoff (date): inclusive start date for the reports
         api_url (str): G2P API URL
         cookies (requests.cookies.RequestsCookieJar): cookies containing the login token
     """
@@ -220,7 +391,7 @@ def generate_report(
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("helvetica", style="B", size=16)
-    pdf.multi_cell(0, 7, f"Data updates from {seven_days_ago} to {current_date}\n")
+    pdf.multi_cell(0, 7, f"Data updates from {date_cutoff} to {current_date}\n")
     pdf.set_font("helvetica", size=12)
 
     # Create the PDF with only the record data updates - minimal report
@@ -228,7 +399,7 @@ def generate_report(
     pdf_minimal.add_page()
     pdf_minimal.set_font("helvetica", style="B", size=16)
     pdf_minimal.multi_cell(
-        0, 7, f"Data updates from {seven_days_ago} to {current_date}\n"
+        0, 7, f"Data updates from {date_cutoff} to {current_date}\n"
     )
     pdf_minimal.set_font("helvetica", size=12)
 
@@ -346,9 +517,22 @@ def generate_report(
     pdf_minimal.output(minimal_report_file)
 
 
-def main():
+def parse_date_cutoff(value: str) -> date:
+    """Validate a calendar date in the exact YYYY-MM-DD format."""
+    try:
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() != value:
+            raise ValueError
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Date cutoff must be a valid date in YYYY-MM-DD format"
+        ) from exc
+    return parsed
+
+
+def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
-        description="Generate a G2P XML file for the EBI search engine"
+        description="Generate G2P activity reports or confidence-only PDF and CSV reports"
     )
     parser.add_argument("--api-url", required=True, help="G2P API URL")
     parser.add_argument(
@@ -360,35 +544,72 @@ def main():
     parser.add_argument(
         "--output-dir", required=True, help="Path to the output directory"
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--confidence-only",
+        "--confidence_only",
+        action="store_true",
+        help="Report only confidence changes since the date cutoff, as PDF and CSV",
+    )
+    parser.add_argument(
+        "--date-cutoff",
+        "--date_cutoff",
+        type=parse_date_cutoff,
+        metavar="YYYY-MM-DD",
+        help="Include updates on or after this date (default: 7 days ago)",
+    )
+    args = parser.parse_args(argv)
 
     api_url = args.api_url
     api_username = args.api_username
     api_password = args.api_password
     output_dir = args.output_dir
 
-    if not os.path.exists(output_dir):
+    if not os.path.isdir(output_dir):
         sys.exit(f"Invalid output directory '{output_dir}'")
 
-    # Get the date from the last week
-    seven_days_ago = datetime.now().date() - timedelta(days=7)
+    date_cutoff = args.date_cutoff or datetime.now().date() - timedelta(days=7)
 
     print("Logging in...")
     cookies = login(api_username, api_password, api_url)
 
-    print("Getting the activity logs from the API...")
-    activity_logs = get_activity_logs(api_url, seven_days_ago, cookies)
-    activity_logs_by_record = format_activity_logs(activity_logs)
-    print("Getting the activity logs from the API... done")
+    try:
+        if args.confidence_only:
+            print(f"Fetching record activity logs since {date_cutoff}...")
+            recent_activity = get_activity_logs(api_url, date_cutoff, cookies)
+            recent_records = {
+                log["g2p_id"]
+                for log in recent_activity
+                if log.get("data_type") == "record" and "g2p_id" in log
+            }
+            activity_by_record = {
+                stable_id: get_record_activity_logs(
+                    api_url, stable_id, cookies, date_cutoff=date_cutoff
+                )
+                for stable_id in sorted(recent_records)
+            }
+            print(f"Fetched activity for {len(activity_by_record)} records")
+            confidence_updates = extract_confidence_updates(
+                activity_by_record, date_cutoff=date_cutoff
+            )
+            print(f"Found {len(confidence_updates)} confidence updates")
+            pdf_file, csv_file = write_confidence_reports(
+                output_dir, confidence_updates, date_cutoff=date_cutoff
+            )
+            print(f"Wrote confidence updates to {pdf_file} and {csv_file}")
+        else:
+            print("Getting the activity logs from the API...")
+            activity_logs = get_activity_logs(api_url, date_cutoff, cookies)
+            activity_logs_by_record = format_activity_logs(activity_logs)
+            print("Getting the activity logs from the API... done")
 
-    print("Generating reports...")
-    generate_report(
-        output_dir, activity_logs_by_record, seven_days_ago, api_url, cookies
-    )
-    print("Generating reports... done")
-
-    print("Logging out...")
-    logout(api_url, cookies)
+            print("Generating reports...")
+            generate_report(
+                output_dir, activity_logs_by_record, date_cutoff, api_url, cookies
+            )
+            print("Generating reports... done")
+    finally:
+        print("Logging out...")
+        logout(api_url, cookies)
 
 
 if __name__ == "__main__":
